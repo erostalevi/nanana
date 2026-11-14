@@ -253,6 +253,10 @@ Behavior:
   - Optional later: replicate the backup bucket to a second region.
   - A **restore drill** script (`infra/scripts/restore-drill.sh`) restores the latest backup into a scratch Postgres and checks account row counts; run before launch and monthly.
   - Captured webhook payloads are ephemeral by design; accounts, identities, tokens, and subdomain ownership are the data that must not be lost.
+  - **Disaster recovery:** the backup bucket is replicated cross-region to `us-west-2` (S3 CRR, versioned, same lifecycle), ~$1/mo at this size.
+- **Alerts:** SNS topic emailing the owner (address passed as a Terraform variable, not committed). Alarms: EC2 status check failed, disk >80%, WAL archive lag / backup job failure, Budget >$20/mo, Postgres container down.
+- **AWS credentials:** owner chose to keep using root keys for now. Terraform will take an `aws_profile` variable so this can move to a scoped admin user later without changes; recommendation to rotate away from root remains open.
+- **Edge protection:** app-level and Caddy rate limits, body caps and the budget alarm only for v1 (no CloudFront/WAF/Cloudflare).
 - **Secrets:** SSM Parameter Store SecureString under `/nanana/prod/*`; the deploy script renders `.env` on the box from them. No secrets are stored in GitHub (OIDC only).
 - **Environments:** prod only on AWS. Local dev uses `*.localhost`; PR CI runs e2e against a throwaway Postgres container.
 - **Guards:** AWS Budget alarm at $20/mo; IMDSv2 required with hop limit 1; security group allows only 80/443 (no SSH).
