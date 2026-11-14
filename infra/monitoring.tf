@@ -1,16 +1,10 @@
 # --------------------------------------------------------------------------------
-# Alerts: SNS topic (email) + CloudWatch alarms + monthly budget.
-# The email subscription must be CONFIRMED by clicking the link AWS sends.
+# Alerts: SNS topic + CloudWatch alarms + monthly budget. Delivery is SNS -> Lambda -> SES
+# (see alerts.tf), so no email-subscription confirmation is needed.
 # --------------------------------------------------------------------------------
 
 resource "aws_sns_topic" "alerts" {
   name = "nanana-alerts"
-}
-
-resource "aws_sns_topic_subscription" "email" {
-  topic_arn = aws_sns_topic.alerts.arn
-  protocol  = "email"
-  endpoint  = var.alert_email
 }
 
 data "aws_iam_policy_document" "alerts_topic" {
