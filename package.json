@@ -1,0 +1,9 @@
+{
+  "name": "nanana",
+  "private": true,
+  "packageManager": "pnpm@12.18.0",
+  "scripts": {
+    "dev:api": "pnpm --filter api start:dev",
+    "test:api": "pnpm --filter api test"
+  }
+}
