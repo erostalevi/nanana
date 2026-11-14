@@ -15,6 +15,12 @@ export type Subdomain = {
   hmac: { header: string; algo: 'sha256' | 'sha1' | 'sha512'; configured: boolean } | null;
   tunnelOnline: boolean;
   mock: { status: number; remaining: number } | null;
+  /** Pro: no idle death and no 7-day cap. Optional so older API versions degrade gracefully. */
+  alwaysOn?: boolean;
+  /** Owner's Pro plan lapsed: ingress answers 402 and stores nothing. */
+  readOnly?: boolean;
+  /** Custom name kept reserved while the owner is on Pro. */
+  reserved?: boolean;
 };
 
 export type Signature = 'pass' | 'fail' | 'header_missing' | 'not_configured';
@@ -62,10 +68,41 @@ export type RequestDetail = RequestSummary & {
   replays: Replay[];
 };
 
+export type PlanId = 'free' | 'pro' | 'pro_grace' | 'lapsed';
+export type Interval = 'month' | 'year';
+
+export type Limits = {
+  maxActiveSubdomains: number;
+  maxCustomNames: number;
+  maxBodyBytes: number;
+  ratePerMinute: number;
+  retentionMaxRequests: number;
+  retentionMaxAgeMs: number;
+  retentionMaxBytes: number;
+  tunnelsPerAccount: number;
+  alwaysOn: boolean;
+  reservedNames: boolean;
+};
+
+export type Billing = {
+  enabled: boolean;
+  status: 'none' | 'active' | 'past_due' | 'canceled';
+  interval: Interval | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  graceUntil: string | null;
+  lapsedUntil: string | null;
+};
+
+export type PlanInfo = { id: 'free' | 'pro'; name: string; priceMonthlyCents: number; priceYearlyCents: number | null; limits: Limits };
+export type PlansResponse = { enabled: boolean; currency: 'usd'; plans: PlanInfo[] };
+
 export type Account = { id: string; email: string; displayName: string | null; plan: string };
 export type MeResponse = {
   account: Account;
-  limits: Record<string, number | string | boolean | null>;
+  limits: Partial<Limits>;
+  /** Absent on API versions without billing. */
+  billing?: Billing;
   providers: { github: boolean; google: boolean; magic: true };
 };
 export type Providers = { github: boolean; google: boolean; magic: true };

@@ -25,7 +25,7 @@ export function CreateEndpoint() {
   if (!r) {
     return (
       <div className="space-y-3">
-        <button type="button" className="btn btn-primary px-5 py-2.5 text-base" disabled={m.isPending} onClick={() => m.mutate()}>
+        <button id="create-endpoint" type="button" className="btn btn-primary px-5 py-2.5 text-base" disabled={m.isPending} onClick={() => m.mutate()}>
           <Wand2 size={18} aria-hidden /> {m.isPending ? 'Creating...' : 'Create an endpoint'}
         </button>
         <p className="text-xs text-faint">No sign-up. A fresh URL in one click, gone after 24 h idle (7 days max).</p>

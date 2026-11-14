@@ -3,11 +3,14 @@ import { ExternalLink, KeyRound, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { dashboardLink } from '../components/CreateEndpoint';
+import { BillingBanners, PlanCard } from '../components/PlanCard';
 import { CodeBlock, ConfirmDialog, CopyButton, Modal, Notice, Spinner } from '../components/ui';
 import { ApiError, api, errorMessage } from '../lib/api';
+import { planLabel } from '../lib/billing';
 import { currentMode } from '../lib/host';
 import { expiryInfo, formatCountdown, relativeTime } from '../lib/time';
 import type { CliToken, Subdomain } from '../lib/types';
+import { useBilling, usePlans } from '../lib/useBilling';
 import { useMe } from '../lib/useMe';
 import { useNow } from '../lib/useNow';
 
@@ -21,11 +24,6 @@ export function parseDashboardLink(v: string): { slug: string; token: string } |
   } catch {
     return null;
   }
-}
-
-function fmtLimit(k: string, v: unknown): string {
-  if (typeof v === 'number' && /bytes$/i.test(k)) return `${(v / 1048576).toFixed(v % 1048576 ? 1 : 0)} MB`;
-  return String(v);
 }
 
 function Unavailable({ e }: { e: unknown }) {
@@ -48,12 +46,15 @@ function EndpointRow({ s, onRotate }: { s: Subdomain; onRotate: (slug: string) =
         <a href={s.url} target="_blank" rel="noopener noreferrer" className="font-mono text-sm hover:text-accent">{s.url}</a>
         <span className={`chip ${s.state === 'active' ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'}`}>{s.state}</span>
         {s.isCustom && <span className="chip bg-raised text-muted">custom</span>}
+        {s.reserved && <span className="chip bg-accent/15 text-accent">reserved</span>}
+        {s.alwaysOn && <span className="chip bg-accent/15 text-accent">always-on</span>}
+        {s.readOnly && <span className="chip bg-bad/15 text-bad" title="Not capturing new requests: the Pro plan lapsed">read-only</span>}
         {s.tunnelOnline && <span className="chip bg-ok/15 text-ok">tunnel</span>}
-        <span className="text-xs text-faint">gone in {formatCountdown(e.goneInMs)}{e.limitedBy === 'hard' ? ' (7-day limit)' : ' if idle'}</span>
+        {!s.alwaysOn && <span className="text-xs text-faint">gone in {formatCountdown(e.goneInMs)}{e.limitedBy === 'hard' ? ' (7-day limit)' : ' if idle'}</span>}
       </div>
       <div className="flex flex-wrap gap-2">
         <a className="btn btn-sm" href={`${dashboardLink(s.slug, 'x', base).replace(/#.*/, '')}`} target="_blank" rel="noopener"><ExternalLink size={12} aria-hidden /> Dashboard</a>
-        <button type="button" className="btn btn-sm" onClick={() => renew.mutate()} disabled={renew.isPending}><RefreshCw size={12} aria-hidden /> Renew +7 days</button>
+        {!s.alwaysOn && <button type="button" className="btn btn-sm" onClick={() => renew.mutate()} disabled={renew.isPending}><RefreshCw size={12} aria-hidden /> Renew +7 days</button>}
         <button type="button" className="btn btn-sm" onClick={() => onRotate(s.slug)}><KeyRound size={12} aria-hidden /> Rotate token</button>
         <button type="button" className="btn btn-sm btn-danger" onClick={() => setConfirm(true)}><Trash2 size={12} aria-hidden /> Delete</button>
       </div>
@@ -74,6 +75,8 @@ export function Account() {
   const base = currentMode().base;
   const enabled = !!me.data;
   const subs = useQuery<{ subdomains: Subdomain[] }>({ queryKey: ['subdomains'], queryFn: () => api('/subdomains'), enabled, retry: false });
+  const billingQ = useBilling(enabled);
+  const plans = usePlans();
   const tokens = useQuery<{ tokens: CliToken[] }>({ queryKey: ['cli-tokens'], queryFn: () => api('/me/tokens'), enabled, retry: false });
   const [rotated, setRotated] = useState<{ slug: string; token: string } | null>(null);
   const [rotateErr, setRotateErr] = useState<string | null>(null);
@@ -105,7 +108,7 @@ export function Account() {
       </div>
     );
   }
-  const { account, limits } = me.data;
+  const { account } = me.data;
   const rotate = async (slug: string) => {
     setRotateErr(null);
     try {
@@ -120,8 +123,15 @@ export function Account() {
     <div className="mx-auto max-w-4xl space-y-10 px-4 py-12">
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Your account</h1>
-        <p className="mt-1 text-sm text-muted">{account.email} · plan <span className="chip bg-raised text-fg">{account.plan}</span></p>
+        <p className="mt-1 text-sm text-muted">{account.email} · plan <span className="chip bg-raised text-fg">{planLabel(account.plan)}</span></p>
       </header>
+
+      <BillingBanners me={me.data} billing={billingQ.data} />
+
+      <section aria-labelledby="plan">
+        <h2 id="plan" className="mb-3 text-lg font-semibold">Plan and limits</h2>
+        <PlanCard me={me.data} billing={billingQ.data} subdomains={subs.data?.subdomains} plans={plans.data} />
+      </section>
 
       <section aria-labelledby="eps">
         <h2 id="eps" className="mb-3 text-lg font-semibold">Endpoints</h2>
@@ -171,15 +181,6 @@ export function Account() {
           </ul>
         )}
         {revoke.isError && <Notice tone="error" className="mt-2">{errorMessage(revoke.error)}</Notice>}
-      </section>
-
-      <section aria-labelledby="plan">
-        <h2 id="plan" className="mb-3 text-lg font-semibold">Plan and limits</h2>
-        <dl className="card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-2">
-          {Object.entries(limits).map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-4 border-b border-line py-1 last:border-0"><dt className="text-muted">{k.replace(/([A-Z])/g, ' $1').toLowerCase()}</dt><dd className="font-mono">{fmtLimit(k, v)}</dd></div>
-          ))}
-        </dl>
       </section>
 
       <section aria-labelledby="danger" className="rounded-xl border border-bad/40 p-4">

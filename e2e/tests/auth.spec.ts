@@ -82,7 +82,7 @@ test.describe('account page', () => {
     await expect(endpointsList(page).getByRole('link', { name: b.url })).toBeVisible();
     await expect(page.getByText(`${email} · plan`)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Plan and limits' })).toBeVisible();
-    await expect(page.getByText('max active subdomains')).toBeVisible();
+    await expect(page.getByTestId('plan-card').getByText('Endpoints', { exact: true })).toBeVisible();
     // dashboard link in the list has no token (owner session)
     await expect(endpointsList(page).getByRole('link', { name: 'Dashboard' }).first()).toHaveAttribute('href', /^http:\/\/[a-z0-9]+\.tools\.localhost:5173\/$/);
   });

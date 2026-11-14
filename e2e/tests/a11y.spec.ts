@@ -2,6 +2,7 @@ import { test, expect, openDashboard, requestRow } from '../fixtures';
 import { createHmac } from 'node:crypto';
 import { A11yRun } from '../lib/a11y';
 import { apiCall, createEndpoint, sendHook, signIn, uniqueEmail } from '../lib/api';
+import { billingFor, checkoutErrors, meFor, mockBilling, plansBody, sub } from '../lib/billingMock';
 import { readMagicLink } from '../lib/mail';
 
 const SECRET = 'a11y-secret';
@@ -235,6 +236,64 @@ for (const [vpName, viewport] of Object.entries(viewports)) {
         await page.goto(`http://${e.slug}.tools.localhost:5173/#t=nnt_wrongwrongwrongwrong`);
         await expect(page.getByRole('heading', { name: 'That token was not accepted' })).toBeVisible();
         await run.scan(page, 'dashboard (bad token screen)');
+
+        await run.save(testInfo);
+        expect(run.blocking.length, `serious/critical a11y violations:\n${run.describe(run.blocking).join('\n')}`).toBe(0);
+      });
+
+      test('billing: pricing and account plan states', async ({ page }, testInfo) => {
+        test.setTimeout(150_000);
+        const run = new A11yRun(`billing ${vpName} ${theme}`);
+        await page.context().addInitScript((t) => localStorage.setItem('nanana:theme', t), theme);
+        const mock = await mockBilling(page, { me: null });
+
+        await page.goto('/#pricing');
+        await expect(page.getByRole('article', { name: 'Pro' })).toBeVisible();
+        await run.scan(page, 'pricing (monthly, signed out)');
+        await page.getByRole('button', { name: /^Yearly/ }).click();
+        await run.scan(page, 'pricing (yearly)');
+        mock.plans = plansBody({ enabled: false });
+        await page.reload();
+        await expect(page.getByRole('button', { name: 'Coming soon' })).toBeDisabled();
+        await run.scan(page, 'pricing (coming soon)');
+        mock.plans = plansBody();
+        mock.me = meFor('free');
+        await page.reload();
+        await expect(page.getByRole('button', { name: 'Upgrade to Pro' })).toBeVisible();
+        await run.scan(page, 'pricing (signed in)');
+        mock.checkout = checkoutErrors.subscribed;
+        await page.getByRole('button', { name: 'Upgrade to Pro' }).click();
+        await expect(page.getByRole('article', { name: 'Pro' }).getByRole('alert')).toBeVisible();
+        await run.scan(page, 'pricing (checkout error)');
+
+        const states: [string, Parameters<typeof meFor>[0], string, Record<string, unknown>[]][] = [
+          ['free', 'free', '/account', [sub('aaaa1111'), sub('bbbb2222', { isCustom: true })]],
+          ['pro', 'pro', '/account?billing=success', [sub('proalways', { alwaysOn: true }), sub('myreserved', { alwaysOn: true, reserved: true, isCustom: true })]],
+          ['pro_grace', 'pro_grace', '/account', [sub('graceone', { alwaysOn: true })]],
+          ['lapsed', 'lapsed', '/account?billing=cancelled', [sub('frozen11', { alwaysOn: true, readOnly: true })]],
+        ];
+        for (const [name, plan, url, subs] of states) {
+          mock.me = meFor(plan);
+          mock.subdomains = subs as ReturnType<typeof sub>[];
+          await page.goto(url);
+          await expect(page.getByTestId('plan-card')).toBeVisible();
+          await expect(page.getByRole('region', { name: 'Endpoints' }).getByRole('listitem').first()).toBeVisible();
+          await run.scan(page, `account plan: ${name}`);
+        }
+        mock.me = meFor('pro');
+        mock.portal = checkoutErrors.noCustomer;
+        await page.goto('/account');
+        await page.getByRole('button', { name: 'Manage billing' }).click();
+        await expect(page.getByTestId('plan-card').getByRole('alert')).toBeVisible();
+        await run.scan(page, 'account plan: portal error');
+        mock.me = meFor('free', billingFor('free', { enabled: false }));
+        await page.goto('/account');
+        await expect(page.getByText('Pro is coming soon')).toBeVisible();
+        await run.scan(page, 'account plan: billing disabled');
+
+        await page.goto('/docs#billing');
+        await expect(page.getByRole('heading', { name: 'Plans and billing' })).toBeVisible();
+        await run.scan(page, 'docs (limits table, plans and billing)');
 
         await run.save(testInfo);
         expect(run.blocking.length, `serious/critical a11y violations:\n${run.describe(run.blocking).join('\n')}`).toBe(0);

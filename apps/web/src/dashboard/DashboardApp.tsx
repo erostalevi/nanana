@@ -144,6 +144,11 @@ function Dashboard({ sub, onGone, onDenied }: { sub: Subdomain; onGone: (w: 'exp
   return (
     <div className="flex h-screen flex-col">
       <Header sub={sub} tunnelTarget={tunnelTarget} status={status} onSettings={() => setDialog('settings')} onMock={() => setDialog('mock')} onDelete={() => setDialog('delete')} />
+      {sub.readOnly && (
+        <div role="alert" className="border-b border-bad/40 bg-bad/10 px-4 py-2.5 text-sm text-fg" data-testid="read-only-banner">
+          <strong className="text-bad">This endpoint is read-only.</strong> New requests are not being captured because the owner&apos;s Pro plan lapsed (senders get 402). Existing captures stay visible. If you own it, resubscribe from your <a className="link" href={`${ctx.apex}/account`}>account</a> to resume capturing.
+        </div>
+      )}
       <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(340px,420px)_1fr]">
         <section aria-label="Requests" className={`min-h-0 min-w-0 flex-col border-r border-line ${selectedReq ? 'hidden lg:flex' : 'flex'}`}>
           {reqQ.isLoading ? <div className="p-6"><Spinner label="Loading requests" /></div> : reqQ.isError ? <p className="p-6 text-sm text-bad">Could not load requests: {errorMessage(reqQ.error)}</p> : (

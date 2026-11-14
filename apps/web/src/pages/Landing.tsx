@@ -1,6 +1,7 @@
 import { Cable, Eye, FileCode2, Repeat, ShieldCheck, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { CreateEndpoint } from '../components/CreateEndpoint';
+import { Pricing } from '../components/Pricing';
 import { CodeBlock } from '../components/ui';
 
 const FEATURES = [
@@ -19,12 +20,12 @@ const STEPS = [
 ];
 
 const FAQ = [
-  ['Is it free?', 'Yes. Anonymous endpoints and free accounts cost nothing. Reserved names and always-on endpoints are planned as paid options later.'],
-  ['What happens to my data?', 'Captured requests are deleted within an hour, and everything about an endpoint is gone within 24 hours of the last activity. Captures are kept in tables that never go into backups.'],
+  ['Is it free?', 'Yes. Anonymous endpoints and free accounts cost nothing. Pro ($8/month or $80/year) adds reserved names, always-on endpoints and higher limits for when you need them.'],
+  ['What happens to my data?', 'On the free plan captured requests are deleted within an hour, and everything about an endpoint is gone within 24 hours of the last activity (Pro keeps 24 hours of history and never idles out). Captures are kept in tables that never go into backups.'],
   ['Do I need an account?', 'No. Creating an endpoint gives you a token. Accounts add custom names, a list of your endpoints and CLI login.'],
   ['Can anyone read my webhooks?', 'Only someone with your dashboard link (it holds a secret token after the #) or, for account endpoints, the owner signed in. Sending to your URL is public by nature, so do not treat the URL itself as a secret.'],
   ['Do you mask secrets in payloads?', 'No. Requests are stored and shown exactly as received, so avoid sending production secrets to a throwaway endpoint.'],
-  ['What are the limits?', '100 requests, 1 hour of history and 50 MB per endpoint, 1 MB bodies for anonymous endpoints (5 MB with an account), and a 7-day maximum life for free endpoints.'],
+  ['What are the limits?', '100 requests, 1 hour of history and 50 MB per endpoint, 1 MB bodies for anonymous endpoints (5 MB with an account), and a 7-day maximum life for free endpoints. Pro raises these to 1000 requests, 24 hours and 250 MB per endpoint, 10 MB bodies, and removes the idle and 7-day limits.'],
 ];
 
 export function Landing() {
@@ -104,7 +105,7 @@ export function Landing() {
 
       <section className="mx-auto max-w-6xl px-4 py-16" aria-labelledby="lifecycle">
         <h2 id="lifecycle" className="mb-3 text-2xl font-semibold tracking-tight">Ephemeral by design</h2>
-        <p className="mb-6 max-w-2xl text-muted">Endpoints sleep after 1 h idle and are gone after 24 h idle, with a 7 day maximum. Each endpoint keeps at most 100 requests, 1 hour of history and 50 MB.</p>
+        <p className="mb-6 max-w-2xl text-muted">Free endpoints sleep after 1 h idle and are gone after 24 h idle, with a 7 day maximum (Pro endpoints are always-on). Each endpoint keeps at most 100 requests, 1 hour of history and 50 MB.</p>
         <div className="grid gap-3 sm:grid-cols-4">
           {[['active', 'activity in the last hour'], ['cold', '1 h to 24 h idle, still captures'], ['gone', '24 h idle: everything deleted'], ['7 days', 'hard ceiling for free endpoints']].map(([a, b]) => (
             <div key={a} className="card p-4"><p className="font-mono text-lg text-accent">{a}</p><p className="text-sm text-muted">{b}</p></div>
@@ -113,13 +114,7 @@ export function Landing() {
       </section>
 
       <section id="pricing" className="border-y border-line bg-panel/50" aria-labelledby="pricing-h">
-        <div className="mx-auto max-w-6xl px-4 py-16">
-          <h2 id="pricing-h" className="mb-3 text-2xl font-semibold tracking-tight">Pricing</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="card p-5"><p className="font-semibold">Free</p><p className="mt-1 text-sm text-muted">Anonymous or with an account. Everything above, forever.</p></div>
-            <div className="card border-dashed p-5"><p className="font-semibold">Reserved names &amp; always-on</p><p className="mt-1 text-sm text-muted">Coming soon.</p></div>
-          </div>
-        </div>
+        <Pricing />
       </section>
 
       <section className="mx-auto max-w-3xl px-4 py-16" aria-labelledby="faq">

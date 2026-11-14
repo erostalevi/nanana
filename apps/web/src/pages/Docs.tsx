@@ -9,6 +9,7 @@ const TOC = [
   ['mocking', 'Response mocking'],
   ['replay', 'Replay'],
   ['limits', 'Limits and lifecycle'],
+  ['billing', 'Plans and billing'],
   ['recipes', 'Provider recipes'],
   ['accounts', 'Accounts'],
 ];
@@ -75,24 +76,37 @@ export function Docs() {
         </ul>
 
         <h2 id="limits">Limits and lifecycle</h2>
-        <div className="not-prose overflow-x-auto rounded-lg border border-line">
+        <div tabIndex={0} role="region" aria-label="Limits per plan (scrollable)" className="not-prose overflow-x-auto rounded-lg border border-line">
           <table className="w-full text-left text-sm">
-            <thead className="bg-raised text-xs uppercase tracking-wider text-faint"><tr><th className="px-3 py-2">What</th><th className="px-3 py-2">Anonymous</th><th className="px-3 py-2">Free account</th></tr></thead>
+            <caption className="sr-only">Limits per plan</caption>
+            <thead className="bg-raised text-xs uppercase tracking-wider text-faint"><tr><th scope="col" className="px-3 py-2">What</th><th scope="col" className="px-3 py-2">Anonymous</th><th scope="col" className="px-3 py-2">Free account</th><th scope="col" className="px-3 py-2">Pro</th></tr></thead>
             <tbody className="divide-y divide-line text-muted">
               {[
-                ['Active endpoints', '3 new per address per day', '3 active, 1 custom name'],
-                ['Body size', '1 MB', '5 MB'],
-                ['Request rate', '60 per minute per endpoint', '300 per minute per endpoint'],
-                ['Retention', 'newest 100 requests, 1 hour, 50 MB', 'same'],
-                ['Active to cold', 'after 1 hour without activity', 'same'],
-                ['Cold to gone', 'after 24 hours without activity', 'same'],
-                ['Maximum life', '7 days', '7 days, renewable once (+7)'],
-                ['Stored response', 'first 1 MB (the sender gets up to 10 MB)', 'same'],
-              ].map(([a, b, c]) => <tr key={a}><th scope="row" className="px-3 py-2 font-medium text-fg">{a}</th><td className="px-3 py-2">{b}</td><td className="px-3 py-2">{c}</td></tr>)}
+                ['Active endpoints', '3 new per address per day', '3 active', '25 active'],
+                ['Custom names', 'none', '1 (idles out like any endpoint)', '10 reserved (never expire while subscribed)'],
+                ['Body size', '1 MB', '5 MB', '10 MB'],
+                ['Request rate', '60 per minute per endpoint', '300 per minute per endpoint', '1500 per minute per endpoint'],
+                ['Retention', 'newest 100 requests, 1 hour, 50 MB', 'same', 'newest 1000 requests, 24 hours, 250 MB'],
+                ['Simultaneous tunnels', '1 per endpoint', '1 per endpoint', '5 per account'],
+                ['Active to cold', 'after 1 hour without activity', 'same', 'always-on: no cold state'],
+                ['Cold to gone', 'after 24 hours without activity', 'same', 'never (always-on)'],
+                ['Maximum life', '7 days', '7 days, renewable once (+7)', 'none (always-on)'],
+                ['Stored response', 'first 1 MB (the sender gets up to 10 MB)', 'same', 'same'],
+              ].map(([a, b, c, d]) => <tr key={a}><th scope="row" className="px-3 py-2 font-medium text-fg">{a}</th><td className="px-3 py-2">{b}</td><td className="px-3 py-2">{c}</td><td className="px-3 py-2">{d}</td></tr>)}
             </tbody>
           </table>
         </div>
         <p>A <strong>cold</strong> endpoint still captures; any activity (a request, a tunnel connection, opening the dashboard) wakes it up. A connected tunnel keeps it active. Over the limit you get <code>429</code> with a <code>Retry-After</code> header; bodies over the cap get <code>413</code>. Expired custom names answer <code>410</code> for 7 days and can only be re-created by their previous owner.</p>
+
+        <h2 id="billing">Plans and billing</h2>
+        <p><strong>Pro</strong> costs $8 per month or $80 per year (two months free), tax excluded. Subscribe from the pricing section on the <Link to="/#pricing">home page</Link> or from <Link to="/account">/account</Link>; payment is handled by Stripe, nanana never sees your card. There is no trial: the free plan is the trial.</p>
+        <ul>
+          <li><strong>Cancel any time</strong> from the billing portal (<strong>Manage billing</strong> on /account). Pro stays active until the end of the period you paid for.</li>
+          <li><strong>If a payment fails</strong>, Stripe retries and you keep Pro for a <strong>7-day grace period</strong>. Update your card in the billing portal during that time.</li>
+          <li><strong>After the grace period</strong> your endpoints become <strong>read-only for 30 days</strong>: existing captures stay visible, new requests are not captured (senders get <code>402</code>) and reserved names stay reserved.</li>
+          <li><strong>After those 30 days</strong> the free rules apply: idle death and the 7-day cap, reserved names are released, and endpoints beyond the free limit are archived, then deleted by the normal lifecycle.</li>
+          <li><strong>Resubscribing</strong> during the read-only window restores everything.</li>
+        </ul>
 
         <h2 id="recipes">Provider recipes</h2>
         <h3>Stripe</h3>

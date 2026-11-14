@@ -8,8 +8,20 @@ import type { Subdomain } from '../lib/types';
 import { useNow } from '../lib/useNow';
 import { tunnelCommand, useDash } from './ctx';
 
+export function ProBadge({ sub }: { sub: Subdomain }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+      <span className="chip bg-accent/15 text-accent" title="Pro plan">Pro</span>
+      <span className="chip bg-accent/15 text-accent" title="No idle death and no 7-day limit">always-on</span>
+      {sub.reserved && <span className="chip bg-raised text-muted" title="This name stays reserved while the owner is on Pro">reserved</span>}
+      {sub.readOnly && <span className="chip bg-bad/15 text-bad">read-only</span>}
+    </div>
+  );
+}
+
 export function ExpiryBadge({ sub }: { sub: Subdomain }) {
   const now = useNow(1000);
+  if (sub.alwaysOn) return <ProBadge sub={sub} />;
   const e = expiryInfo(sub, now);
   const active = sub.state === 'active';
   return (
