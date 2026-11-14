@@ -245,7 +245,10 @@ Behavior:
 
 ## 14. Infra and deploy
 
-- **VM:** `t4g.small`/Lightsail 2 GB, Ubuntu, Docker Compose. Elastic IP; Route 53 records: `A nanana.lat`, `A *.nanana.lat`, `A *.tools.nanana.lat`, `A api.nanana.lat`, `www` CNAME. SES: verified `nanana.lat` domain with DKIM/SPF/DMARC (+ production access request, since sandbox only mails verified addresses).
+- **Cost target (us-east-1, on-demand):** EC2 `t4g.micro` ~$6.1 + public IPv4 ~$3.65 + 20 GB gp3 ~$1.6 + Route 53 zone $0.50 + S3/ECR/SES pennies = **~$12/mo**. Swap file (1 GB) because 1 GB RAM is tight; resize to `t4g.small` (+~$6) if needed. A 1-yr Compute Savings Plan would cut the instance cost later.
+- **IaC:** Terraform in `infra/`, state in an S3 bucket (native S3 locking). Resources: EC2 + EIP + SG (80/443 only, no SSH), IAM instance role (SSM, ECR pull, S3 backups, Route 53 DNS-01 for Caddy), ECR repo, S3 backup bucket, Route 53 zone `nanana.lat`, GitHub OIDC provider + deploy roles.
+- **Deploys:** PRs into `main` run CI (tests, build, `terraform plan`) with a read-only OIDC role. Merge/push to `main` builds images, pushes to ECR, then deploys via **SSM Run Command** (`docker compose pull && up -d`), using an OIDC role trusted only for `repo:erostalevi/nanana:ref:refs/heads/main`. No SSH, no long-lived AWS keys in GitHub. The existing `erostalevi-landing-github-deploy` role belongs to another repo and is not reused.
+- **VM:** Ubuntu/Amazon Linux arm64, Docker Compose. Elastic IP; Route 53 records: `A nanana.lat`, `A *.nanana.lat`, `A *.tools.nanana.lat`, `A api.nanana.lat`, `www` CNAME. SES: verified `nanana.lat` domain with DKIM/SPF/DMARC (+ production access request, since sandbox only mails verified addresses).
 - **Caddy** image built with `caddy-dns/route53` (IAM user scoped to the hosted zone's TXT records for DNS-01).
 - **Compose services:** `caddy`, `api`, `postgres:16` (volume), `backup` (nightly `pg_dump` to S3, 7 day retention; data is ephemeral but accounts aren't).
 - **Config via `.env`/AWS SSM:** `BASE_DOMAIN`, `DATABASE_URL`, `SESSION_SECRET`, `ENCRYPTION_KEY`, `IP_HASH_SECRET`, OAuth client IDs/secrets, `SES_*`, limits overrides.
