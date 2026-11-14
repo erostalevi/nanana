@@ -76,6 +76,7 @@ export class SubdomainsController {
   }
 
   @Post(':slug/claim')
+  @HttpCode(200)
   async claim(@Req() req: Request, @Param('slug') slug: string, @Body() body: { token?: unknown }) {
     const a = await this.access.requireAccount(req);
     if (typeof body?.token !== 'string') throw badRequest('invalid_token', 'token is required');
@@ -83,6 +84,7 @@ export class SubdomainsController {
   }
 
   @Post(':slug/renew')
+  @HttpCode(200)
   async renew(@Req() req: Request, @Param('slug') slug: string) {
     const a = await this.access.requireAccount(req);
     const row = await this.access.authorizeSub(req, slug);
@@ -91,6 +93,7 @@ export class SubdomainsController {
   }
 
   @Post(':slug/token')
+  @HttpCode(200)
   async rotate(@Req() req: Request, @Param('slug') slug: string) {
     const a = await this.access.requireAccount(req);
     const row = await this.access.authorizeSub(req, slug);

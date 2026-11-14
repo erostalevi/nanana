@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
-import { AccessService } from './auth/access.service.js';
+import { ACCOUNT_RESOLVER, AccessService } from './auth/access.service.js';
+import { AccountsService } from './auth/accounts.service.js';
+import { AuthController } from './auth/auth.controller.js';
+import { MailService } from './auth/mail.service.js';
+import { OAuthService } from './auth/oauth.service.js';
 import { DbModule } from './db/db.module.js';
 import { EventsService } from './events/events.service.js';
 import { HealthController } from './health/health.controller.js';
@@ -16,13 +20,17 @@ import { TunnelService } from './tunnel/tunnel.service.js';
 
 @Module({
   imports: [DbModule],
-  controllers: [HealthController, SubdomainsController, RequestsController],
+  controllers: [HealthController, SubdomainsController, RequestsController, AuthController],
   providers: [
     EventsService,
     TunnelService,
     TunnelGateway,
     SubdomainsService,
     AccessService,
+    MailService,
+    AccountsService,
+    OAuthService,
+    { provide: ACCOUNT_RESOLVER, useExisting: AccountsService },
     MocksService,
     ReplayService,
     RequestsService,

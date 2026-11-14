@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { COLD_AFTER_MS, DEAD_AFTER_MS } from '../config/plan-limits.js';
 import { EventsService } from '../events/events.service.js';
+import { AccountsService } from '../auth/accounts.service.js';
 import { SubdomainsService, type SubRow } from '../subdomains/subdomains.service.js';
 import { TunnelService } from '../tunnel/tunnel.service.js';
 
@@ -19,6 +20,7 @@ export class LifecycleService implements OnModuleInit, OnModuleDestroy {
     @Inject(SubdomainsService) private readonly subs: SubdomainsService,
     @Inject(EventsService) private readonly events: EventsService,
     @Inject(TunnelService) private readonly tunnels: TunnelService,
+    @Inject(AccountsService) private readonly accounts: AccountsService,
   ) {}
 
   onModuleInit(): void {
@@ -85,12 +87,7 @@ export class LifecycleService implements OnModuleInit, OnModuleDestroy {
     );
     for (const r of old) this.events.emit(r.slug, 'request.deleted', { id: r.id });
     await q(this.ds, 'DELETE FROM slug_tombstone WHERE until < now()');
-    await this.housekeeping();
+    await this.accounts.cleanup();
     return { cold, dead, evicted: old.length };
-  }
-
-  /** Overridden/extended by the accounts module for sessions, device codes and magic links. */
-  protected async housekeeping(): Promise<void> {
-    return;
   }
 }

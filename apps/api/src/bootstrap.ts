@@ -4,12 +4,9 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { AppModule } from './app.module.js';
 import { loadConfig } from './config/app-config.js';
 import { ApiExceptionFilter } from './common/errors.js';
+import { isAllowedOrigin } from './common/origin.js';
 import { IngressService } from './ingress/ingress.service.js';
 import { TunnelGateway } from './tunnel/tunnel.gateway.js';
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 export async function createApp(): Promise<NestExpressApplication> {
   const cfg = loadConfig();
@@ -21,10 +18,9 @@ export async function createApp(): Promise<NestExpressApplication> {
   app.use(app.get(IngressService).middleware);
 
   // 2. CORS for the API (web app origins only, with credentials).
-  const origin = new RegExp(`^https?://((www|[a-z0-9-]+\\.tools)\\.)?${escapeRe(cfg.baseDomain)}(:\\d+)?$`);
   app.use((req: Request, res: Response, next: NextFunction) => {
     const o = req.headers.origin;
-    if (o && origin.test(o)) {
+    if (o && isAllowedOrigin(cfg, o)) {
       res.setHeader('Access-Control-Allow-Origin', o);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Vary', 'Origin');
