@@ -271,3 +271,23 @@ describe('live stream', () => {
     sse.close();
   });
 });
+
+describe('load-test bypass', () => {
+  it('only skips limits with the operator token', async () => {
+    const cfg = h.app.get<import('../src/config/app-config.js').AppConfig>((await import('../src/config/app-config.js')).APP_CONFIG);
+    cfg.loadtestToken = 'x'.repeat(32);
+    try {
+      for (let i = 0; i < 3; i++) await h.create();
+      expect((await h.api('post', '/subdomains').send({})).status).toBe(429);
+      expect((await h.api('post', '/subdomains').set('x-loadtest-token', 'wrong').send({})).status).toBe(429);
+      const ok = await h.api('post', '/subdomains').set('x-loadtest-token', cfg.loadtestToken).send({});
+      expect(ok.status).toBe(201);
+      const slug = ok.body.subdomain.slug;
+      let limited = 0;
+      for (let i = 0; i < 80; i++) if ((await h.ingress(slug, 'get', '/r').set('x-loadtest-token', cfg.loadtestToken)).status === 429) limited++;
+      expect(limited).toBe(0);
+    } finally {
+      cfg.loadtestToken = '';
+    }
+  });
+});

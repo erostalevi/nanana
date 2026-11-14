@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { v7 as uuidv7 } from 'uuid';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { limitsFor } from '../config/plan-limits.js';
+import { isLoadtest } from '../common/loadtest.js';
 import { RateLimiter } from '../common/rate-limiter.js';
 import { PayloadTooLarge, rawHeaders, readBody, stripHopByHop, type HeaderMap } from '../common/http.js';
 import { resolveHost } from '../hosts/host-resolver.js';
@@ -69,7 +70,7 @@ export class IngressService {
     }
 
     const limits = limitsFor(sub.owner_id ? 'free' : null);
-    const wait = this.limiter.take(`sub:${sub.id}`, limits.ratePerMinute);
+    const wait = isLoadtest(this.cfg, req) ? 0 : this.limiter.take(`sub:${sub.id}`, limits.ratePerMinute);
     if (wait > 0) return this.send(res, 429, '{"error":"rate_limited"}', { 'retry-after': String(wait) });
 
     let body: Buffer;

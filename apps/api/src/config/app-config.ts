@@ -24,6 +24,8 @@ export interface AppConfig {
   adminEmails: string[];
   runJobs: boolean;
   replayAllowPrivate: boolean;
+  /** Operator-only secret: lets tools/loadtest skip the per-IP creation limit and per-sub rate limit. */
+  loadtestToken: string;
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -66,6 +68,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     adminEmails: (env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     runJobs: env.RUN_JOBS !== 'false',
     replayAllowPrivate: env.REPLAY_ALLOW_PRIVATE === 'true',
+    loadtestToken: env.LOADTEST_TOKEN ?? '',
   };
 }
 

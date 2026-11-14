@@ -88,7 +88,7 @@ export class SubdomainsService {
     };
   }
 
-  async create(input: { ownerId: string | null; plan: string | null; name?: string; ip: string }) {
+  async create(input: { ownerId: string | null; plan: string | null; name?: string; ip: string; skipIpLimit?: boolean }) {
     const limits = limitsFor(input.ownerId ? (input.plan ?? 'free') : null);
     const ipHash = hashIp(input.ip, this.cfg.ipHashSecret);
     const name = input.name?.trim().toLowerCase();
@@ -99,7 +99,7 @@ export class SubdomainsService {
         `SELECT count(*) AS n FROM subdomain WHERE created_ip_hash = $1 AND created_at > now() - interval '1 day'`,
         [ipHash],
       );
-      if (Number(n) >= ANONYMOUS_CREATES_PER_IP_PER_DAY)
+      if (!input.skipIpLimit && Number(n) >= ANONYMOUS_CREATES_PER_IP_PER_DAY)
         throw new ApiError(429, 'rate_limited', 'Too many subdomains created from this address today', {
           'Retry-After': '3600',
         });
