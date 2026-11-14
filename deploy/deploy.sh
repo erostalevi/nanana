@@ -88,7 +88,7 @@ if ! wait_healthy; then
 fi
 
 # First deploy: take the initial base backup right away so PITR works from day one.
-if ! docker exec -u postgres nanana-postgres wal-g backup-list 2>/dev/null | grep -q base_; then
+if ! timeout 60 docker exec -u postgres nanana-postgres wal-g backup-list </dev/null 2>/dev/null | grep -q base_; then
   echo "no base backup yet; starting one in the background"
   systemctl start --no-block nanana-backup.service || true
 fi
