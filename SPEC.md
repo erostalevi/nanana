@@ -1,4 +1,4 @@
-# nanana.lat: Webhook Inspector, Replayer & Tunnel. Spec v0.2
+# nanana.lat: Webhook Inspector, Replayer & Tunnel. Spec v0.3
 
 Public, self-operated service on **nanana.lat**. Anyone can spin up a throwaway subdomain, point webhooks at it, watch requests arrive live, replay them, and (with the `nanana` CLI) tunnel them into a port on their own machine. Accounts unlock custom names and CLI management; paid tiers (reservations, always-on) come later and are designed for, not built.
 
@@ -8,7 +8,7 @@ Public, self-operated service on **nanana.lat**. Anyone can spin up a throwaway 
 
 | Area | Decision |
 |---|---|
-| Hosting | Single EC2/Lightsail VM in **us-east-1**, Docker Compose: Caddy + API + Postgres. DNS in Route 53 (`*.nanana.lat` wildcard to the VM) |
+| Hosting | Single EC2 `t3.micro` in **us-east-1**, Docker Compose: Caddy + API + Postgres. DNS in Route 53 (zone `nanana.lat` created, id `Z04632171NY87UGQ81RCZ`; `*.nanana.lat` wildcard to the VM) |
 | TLS | Caddy with the Route 53 DNS-01 plugin, wildcard certs |
 | Auth | Anonymous (token-based) **and** accounts. SSO: GitHub, Google, email magic link (SES, us-east-1). CLI uses browser device flow |
 | Billing | Nothing built now; data model and limits are plan-aware (`plan` field + `PlanLimits` service) |
@@ -23,7 +23,21 @@ Public, self-operated service on **nanana.lat**. Anyone can spin up a throwaway 
 | Features kept | HMAC check, response mocking, copy as curl, live dashboard updates |
 | Architecture | NestJS monolith incl. WebSocket tunnel gateway. One React/Vite app (landing is a route) |
 | Claiming | An anonymous subdomain can be claimed by an account using its token |
-| Repo | Monorepo (`apps/api`, `apps/web`, `cli`), GitHub Actions, private for now |
+| Repo | Monorepo (`apps/api`, `apps/web`, `cli`), GitHub Actions, private (`erostalevi/nanana`). CLI binaries are published from a separate **public releases repo** |
+| Captured data vs backups | `captured_request`, `replay` and `mock_rule` are Postgres **UNLOGGED** tables: never in WAL or backups, so "payloads deleted within 24 h" is literally true. Lost on a Postgres crash (acceptable). Accounts/tokens/subdomains are fully WAL-archived |
+| Storage caps | Per-subdomain byte budget **50 MB** (oldest evicted first) on top of 100 requests / 1 h. Account body cap 5 MB, anonymous 1 MB |
+| Max lifetime | Free/anonymous subdomains hard-expire **7 days** after creation regardless of activity (accounts can renew once from the dashboard) |
+| Name reuse | Dead custom names have a **7-day tombstone**: only the previous owner can re-claim; dead slugs return `410 Gone` meanwhile. Random slugs are 8+ base36 chars |
+| Secrets in captures | Stored and shown as received (no masking, no redaction) |
+| Preflights | `OPTIONS` CORS preflights get an automatic permissive `204` and are stored with `is_preflight` (hideable); real requests get CORS headers added when the upstream response lacks them |
+| Responses | Relay up to 10 MB to the sender, store only the first 1 MB (`truncated` flag); no streaming/SSE passthrough (25 s limit) |
+| Email | SES (us-east-1): `noreply@` sends magic links; `abuse@` and `support@` received by SES inbound, stored in S3, forwarded by a small Lambda to the owner |
+| Language | English only for v1 |
+| Admin | Admin CLI run through SSM on the box (disable sub/account, stats) + read-only `/admin` stats page behind the owner's GitHub login |
+| Waitlist | None: pricing teaser is "coming soon", no email capture |
+| Design | Playful-minimal, dark-first, monospace accents, tiny wordmark with the ◡̈ face |
+| Legal | Plain-language Terms, Privacy and Abuse pages drafted by Claude, reviewed by owner (not legal advice) |
+| Build order | Product first (M1-M3, local), then infra and first deploy |
 
 ---
 
@@ -58,6 +72,12 @@ active --(idle >= 1h)--> cold --(idle >= 24h)--> dead (hard delete)
 
 **Activity** = inbound request to `<sub>`, CLI tunnel connect (and each heartbeat while connected), dashboard load/stream open, API call using its token. A connected tunnel keeps the subdomain `active` indefinitely. While `cold`, captures still work (no tunnel assumed unless CLI reconnects) and the first activity flips it back to `active` and resets the clock.
 
+**Hard lifetime (free/anonymous):** a subdomain also dies at `hard_expires_at` = creation + 7 days, whatever its activity; account owners may renew once from the dashboard (+7 days). The dashboard shows the countdown. Paid "always-on" will lift this later.
+
+**Name tombstones:** when a custom-named subdomain dies, `slug_tombstone(slug, owner_id, until = now + 7d)` is written. During that window the slug returns `410 Gone` on ingress and only the previous owner can re-create it. Random slugs are 8+ base36 chars (~2.8e12 space), so reuse is not a practical concern; they are not tombstoned.
+
+**Storage budget:** each subdomain may hold at most **50 MB** of captured bodies (request + stored response). On insert, the oldest requests are evicted until under budget (a single request larger than the budget is rejected with `413`).
+
 **Retention enforced two ways:** (a) on every insert, delete requests beyond the newest 100 for that subdomain; (b) a per-minute job deletes requests older than 1 h and processes state transitions (`active` to `cold`, hard-delete dead ones with cascade). Replays and mock rules are deleted with their parent.
 
 Future paid levers (modeled now, unused): `always_on_until`, `reserved_until` on subdomain; retention/size/rate numbers come from `PlanLimits(plan)`.
@@ -88,9 +108,10 @@ Future paid levers (modeled now, unused): `always_on_until`, `reserved_until` on
 |---|---|---|
 | Active subdomains | 3 new/IP/day | 3 active |
 | Custom names | no | 1 |
-| Max body | 1 MB | 10 MB |
+| Max body | 1 MB | 5 MB |
 | Rate (per sub) | 60 req/min | 300 req/min |
-| Retention | 100 req / 1 h | 100 req / 1 h |
+| Retention | 100 req / 1 h / 50 MB | 100 req / 1 h / 50 MB |
+| Max lifetime | 7 days | 7 days (+7 once) |
 
 Rate limiting: in-memory token bucket keyed by sub (and by IP for creation/login endpoints); single VM, so no Redis. Over limit returns `429` with `Retry-After`. Hashed IPs (HMAC with server secret) are kept for creation limits; raw IPs are stored only on captures, for display.
 
@@ -102,13 +123,13 @@ Pipeline per request:
 
 1. Resolve sub by Host; 404 if missing/dead. Enforce body cap (413) and rate limit (429).
 2. Read **raw** body bytes (no parser touches it).
-3. Persist `captured_request` (method, full path+query, headers as received, raw body, size, source IP, timestamp). Bump `last_activity_at` (revive if cold). Emit SSE event.
+3. If `OPTIONS` with `Access-Control-Request-Method`: answer `204` with permissive CORS headers, store the request with `is_preflight=true`, stop. Otherwise persist `captured_request` (method, full path+query, headers as received, raw body, size, source IP, timestamp). Bump `last_activity_at` (revive if cold). Emit SSE event.
 4. Decide the response:
    - **Mock rule active?** Return the rule's response, decrement `remaining`. Not forwarded. Capture still stored, marked `mocked`.
    - **Tunnel connected?** Forward through the tunnel; return the local app's status/headers/body to the sender. Local timeout 25 s. On timeout/connection-refused/tunnel drop: mark `forward_error`, respond with the **offline status** (below).
    - **No tunnel:** respond with the offline status.
 5. **Offline status:** per-subdomain setting `offline_status` (default `200`, body `{"ok":true}`), switchable to e.g. `502/503` to deliberately trigger sender retries.
-6. Store the response that was actually sent (status, headers, body capped at 1 MB) on the capture, plus latency and who answered (`tunnel | mock | offline`).
+6. Add CORS headers (`Access-Control-Allow-Origin: *` plus allow-methods/headers) to the sender-facing response when the upstream response lacks them. Relay up to 10 MB; store the response that was actually sent (status, headers, first 1 MB of body, `truncated` flag) on the capture, plus latency and who answered (`tunnel | mock | offline`).
 
 Hop-by-hop headers (`connection`, `transfer-encoding`, `keep-alive`, `upgrade`, `te`, `trailer`) are stripped in both directions; `host` is rewritten to the CLI target host unless `--preserve-host`; `X-Forwarded-For/Proto/Host` added.
 
@@ -172,6 +193,8 @@ Configured per subdomain: `secret`, `header` name, `algo` (sha256 default; sha1,
 **replay**: `id`, `request_id` fk cascade, `target_type`, `target_url` null, `status` null, `response_headers`, `response_body`, `truncated`, `error`, `duration_ms`, `created_at`
 **mock_rule**: `id`, `subdomain_id` fk cascade (unique), `status`, `headers` jsonb, `body`, `remaining`, `created_at`
 
+**Additions from v0.3:** `subdomain.hard_expires_at`, `subdomain.renewed_at`; `captured_request.is_preflight`, `captured_request.mocked`, `response_truncated`; `slug_tombstone(slug pk, owner_id, until)`. **`captured_request`, `replay` and `mock_rule` are created `UNLOGGED`** (not WAL-logged, so excluded from backups and replicas; their contents are lost on a crash). `subdomain`, accounts, identities, tokens and tombstones are regular logged tables.
+
 Cleanup is cascade-driven; the per-minute job also deletes expired sessions, device auths, and magic links.
 
 ---
@@ -224,14 +247,14 @@ Behavior:
 - **Live tail**: one line per request: time, method, path, status, latency, `signature ✓/✗`, `[replay]`/`[mock]` tags. Colors off when not a TTY; `--json` for machine output.
 - Reconnects automatically (backoff), prints state changes. Local connection refused gives a clear message and the sender sees the offline status.
 - Config precedence: flags, env (`NANANA_TOKEN`, `NANANA_API`), credentials file. `NANANA_API` default `https://api.nanana.lat` (override for local dev).
-- Distribution: GoReleaser to GitHub Releases (darwin/linux/windows, amd64/arm64), `install.sh` (`curl -fsSL https://nanana.lat/install.sh | sh`), Homebrew tap later. Release binaries signed with checksums (cosign later).
+- Distribution: GoReleaser publishes to GitHub Releases of a separate **public repo** (e.g. `erostalevi/nanana-releases`) so the main repo can stay private (darwin/linux/windows, amd64/arm64). `install.sh` is served by Caddy at `https://nanana.lat/install.sh` and downloads from that repo; Homebrew tap lives there later. Checksums published; cosign later.
 - Libs: `cobra`/`pflag`, `gorilla/websocket` or `nhooyr/websocket`, `lipgloss` for output.
 
 ---
 
 ## 13. Web app (React + Vite + TS, TanStack Query, Tailwind)
 
-**Landing (`nanana.lat`, `www`)**: hero with one-click "Create an endpoint" (live demo: shows URL and a copy-paste curl that fires a test webhook and appears live), how it works (3 steps), CLI install and usage (`-t -p -h` examples), feature grid (live inspector, replay, tunnel, HMAC, mocking), lifecycle/limits explainer ("Endpoints sleep after 1 h and vanish after 24 h idle"), pricing teaser ("Reserved names & always-on: coming soon", email capture optional), FAQ, footer with status/GitHub. Pages: `/docs` (usage, protocol overview, webhook provider recipes for Transbank, Stripe), `/login`, `/device`, `/account` (subdomains list, CLI tokens, claim, delete account).
+**Landing (`nanana.lat`, `www`)**: hero with one-click "Create an endpoint" (live demo: shows URL and a copy-paste curl that fires a test webhook and appears live), how it works (3 steps), CLI install and usage (`-t -p -h` examples), feature grid (live inspector, replay, tunnel, HMAC, mocking), lifecycle/limits explainer ("Endpoints sleep after 1 h and vanish after 24 h idle"), pricing teaser ("Reserved names & always-on: coming soon", no email capture), FAQ, footer with status/GitHub. Pages: `/docs` (usage, protocol overview, webhook provider recipes for Transbank, Stripe), `/login`, `/device`, `/account` (subdomains list, CLI tokens, claim, delete account), `/terms`, `/privacy`, `/abuse` (plain-language, drafted by Claude, owner reviews), `/admin` (read-only stats behind the owner's GitHub login). English only; dark-first, playful-minimal visual identity.
 
 **Dashboard (`<sub>.tools.nanana.lat`)**:
 - Header: public URL with copy, state badge (active/cold + idle countdown to death), tunnel indicator (connected target `localhost:3000`), settings (offline status, HMAC), mock panel, delete.
@@ -250,7 +273,6 @@ Behavior:
   - Postgres data lives on a **separate EBS data volume** (`DeleteOnTermination=false`, termination protection on, `prevent_destroy` in Terraform), so replacing the instance keeps the data.
   - **Continuous WAL archiving to S3 (WAL-G)** + weekly base backups: point-in-time recovery to any second within 30 days. Backup bucket: versioning on, encrypted, object-lock/lifecycle 30 days, public access blocked, bucket policy denies deletes except by a break-glass role.
   - **Daily EBS snapshots** via Data Lifecycle Manager (7 daily, 4 weekly).
-  - Optional later: replicate the backup bucket to a second region.
   - A **restore drill** script (`infra/scripts/restore-drill.sh`) restores the latest backup into a scratch Postgres and checks account row counts; run before launch and monthly.
   - Captured webhook payloads are ephemeral by design; accounts, identities, tokens, and subdomain ownership are the data that must not be lost.
   - **Disaster recovery:** the backup bucket is replicated cross-region to `us-west-2` (S3 CRR, versioned, same lifecycle), ~$1/mo at this size.
@@ -262,11 +284,11 @@ Behavior:
 - **Guards:** AWS Budget alarm at $20/mo; IMDSv2 required with hop limit 1; security group allows only 80/443 (no SSH).
 - **IaC:** Terraform in `infra/`, state in an S3 bucket (native S3 locking). Resources: EC2 + EIP + SG (80/443 only, no SSH), IAM instance role (SSM, ECR pull, S3 backups, Route 53 DNS-01 for Caddy), ECR repo, S3 backup bucket, Route 53 zone `nanana.lat`, GitHub OIDC provider + deploy roles.
 - **Deploys:** PRs into `main` run CI (tests, build, `terraform plan`) with a read-only OIDC role. Merge/push to `main` builds images, pushes to ECR, then deploys via **SSM Run Command** (`docker compose pull && up -d`), using an OIDC role trusted only for `repo:erostalevi/nanana:ref:refs/heads/main`. No SSH, no long-lived AWS keys in GitHub. The existing `erostalevi-landing-github-deploy` role belongs to another repo and is not reused.
-- **VM:** Ubuntu/Amazon Linux arm64, Docker Compose. Elastic IP; Route 53 records: `A nanana.lat`, `A *.nanana.lat`, `A *.tools.nanana.lat`, `A api.nanana.lat`, `www` CNAME. SES: verified `nanana.lat` domain with DKIM/SPF/DMARC (+ production access request, since sandbox only mails verified addresses).
-- **Caddy** image built with `caddy-dns/route53` (IAM user scoped to the hosted zone's TXT records for DNS-01).
+- **VM:** Ubuntu/Amazon Linux x86_64, Docker Compose. Elastic IP; Route 53 records: `A nanana.lat`, `A *.nanana.lat`, `A *.tools.nanana.lat`, `A api.nanana.lat`, `www` CNAME. SES: verified `nanana.lat` domain with DKIM/SPF/DMARC (+ production access request, since sandbox only mails verified addresses); `MX` record to SES inbound for `abuse@`/`support@` (S3 + Lambda forwarder). **DNS:** the hosted zone already exists; delegate it by setting the four Route 53 NS records as Custom DNS at Namecheap.
+- **Caddy** image built with `caddy-dns/route53` (uses the instance role, scoped to this hosted zone's TXT records for DNS-01).
 - **Compose services:** `caddy`, `api`, `postgres:16` (data on the dedicated EBS volume, WAL-G archiving to S3; see Data safety above).
 - **Config via `.env`/AWS SSM:** `BASE_DOMAIN`, `DATABASE_URL`, `SESSION_SECRET`, `ENCRYPTION_KEY`, `IP_HASH_SECRET`, OAuth client IDs/secrets, `SES_*`, limits overrides.
-- **CI/CD (GitHub Actions):** lint+test on PR (api, web, cli); on tag: build and push images to GHCR, GoReleaser CLI release; deploy job SSHes to the VM and runs `docker compose pull && up -d` (migrations run on api start).
+- **CI/CD (GitHub Actions):** lint + test + `terraform plan` on PR (read-only OIDC role); on merge to `main`: build images, push to ECR, deploy via SSM Run Command (`docker compose pull && up -d`; migrations run on api start). On version tag: GoReleaser publishes CLI binaries to the public releases repo.
 - **Observability:** structured JSON logs (pino), `/healthz`, basic Prometheus metrics (`/metrics` internal only), CloudWatch alarm on instance status; uptime check on `api.nanana.lat/healthz`.
 
 ---
@@ -276,7 +298,7 @@ Behavior:
 - Captured bodies are **never rendered as HTML**; dashboard escapes everything; strict CSP; `X-Content-Type-Options: nosniff`.
 - Anonymous ingress is write-only to the public: no way to read captures without a token.
 - Dashboards served from `*.tools.nanana.lat`, ingress from `*.nanana.lat`: distinct origins, no cookies shared with ingress hosts (session cookie is host-only on `api.`).
-- Abuse: per-sub and per-IP rate limits, body caps, reserved names, takedown command (`admin disable-sub <slug>`), ToS/abuse contact page. Phishing/echo-server abuse risk accepted; mitigated by ephemerality and no custom response bodies for anonymous subs beyond the offline body (max 4 KB, forced `text/plain`/JSON content type).
+- Abuse: per-sub and per-IP rate limits, body caps, reserved names, takedown via the admin CLI (`admin disable-sub <slug>`, run through SSM), ToS/Privacy/Abuse pages with a monitored `abuse@nanana.lat`. Phishing/echo-server abuse risk accepted; mitigated by ephemerality and no custom response bodies for anonymous subs beyond the offline body (max 4 KB, forced `text/plain`/JSON content type).
 - Secrets (HMAC) encrypted at rest; tokens and device/magic codes hashed; constant-time comparisons.
 - Privacy: payload data is deleted within 24 h by design; state this plainly on the landing page. Never log bodies.
 - Account deletion removes identities, sessions, tokens, owned subdomains.
@@ -285,7 +307,7 @@ Behavior:
 
 ## 16. Testing
 
-- **API e2e (Jest + supertest, real Postgres):** raw byte preservation (non-UTF-8, odd whitespace); retention (cap 100 and 1 h); lifecycle transitions with a fake clock; rate/body limits; mock countdown; HMAC vectors incl. Stripe; SSRF guard (private IPs, redirects, DNS rebinding stub); device flow; claim; limits by plan.
+- **API e2e (Vitest + supertest, real Postgres):** raw byte preservation (non-UTF-8, odd whitespace); retention (cap 100 and 1 h); lifecycle transitions with a fake clock; rate/body limits; mock countdown; HMAC vectors incl. Stripe; SSRF guard (private IPs, redirects, DNS rebinding stub); device flow; claim; limits by plan.
 - **Tunnel integration:** real WS client against a stub local HTTP server: proxying success, local timeout, ECONNREFUSED, replaced connection, in-flight drop, replay frame.
 - **CLI:** Go unit tests for flag parsing (`-t= -p= -h=`), reconnect/backoff, output formatting; e2e against a locally started API.
 - **Web:** Playwright smoke: create sub, curl it, see it live, replay through a fake tunnel, mock then clear.
@@ -294,24 +316,28 @@ Behavior:
 
 ## 17. Milestones
 
-- **M0 Foundations:** monorepo scaffold, local Postgres, `BASE_DOMAIN=localhost` host routing, migrations, config/limits module.
-- **M1 Ingress core:** create anonymous sub, capture pipeline, list/detail, retention + lifecycle job, rate/body limits, SSE.
+Product first, then infra (decision Q13).
+
+- **M0 Foundations (done):** monorepo scaffold, local Postgres, `BASE_DOMAIN=localhost` host routing, migrations, config/limits module.
+- **M1 Ingress core:** create anonymous sub, capture pipeline (incl. preflight, CORS, response storage), list/detail, retention + byte budget + lifecycle + 7-day hard expiry job, UNLOGGED capture tables, rate/body limits, SSE.
 - **M2 Tunnel:** WS gateway, protocol, offline status, response capture; Go CLI `tunnel` command with live tail.
 - **M3 Replay, HMAC, mocking:** tunnel and URL replay with SSRF guard, HMAC verify, mock rules.
-- **M4 Dashboard + landing:** React app, all dashboard panels, landing and docs.
-- **M5 Accounts:** magic link, GitHub, Google, sessions, device flow, CLI `login/list/create/delete/claim`, custom names, plan limits.
-- **M6 Ship:** Caddy and Route 53 wildcard TLS, Compose, SES, backups, CI/CD, GoReleaser/`install.sh`, abuse tooling, smoke test on prod.
+- **M4 Infra and first deploy:** Terraform (`infra/`), Route 53 wildcard TLS, Compose, backups + restore drill, alarms, OIDC CI/CD, public releases repo + `install.sh`. Ship the headless product (API + CLI) for dogfooding.
+- **M5 Dashboard + landing:** React app, all dashboard panels, landing, docs, legal pages.
+- **M6 Accounts:** magic link, GitHub, Google, sessions, device flow, CLI `login/list/create/delete/claim`, custom names, tombstones, plan limits, SES inbound forwarder, admin CLI and `/admin` page.
+- **M7 Launch hardening:** abuse tooling review, SES production access, load test on the VM, restore drill, docs polish.
 
 ---
 
 ## 18. Defaults I'm assuming (shout if wrong)
 
 1. Dashboard host is `<sub>.tools.nanana.lat` (see §2 for why).
-2. Local dev: Postgres via Homebrew (`postgresql@16`; neither Postgres nor Docker is installed on this machine yet); Docker only needed for deploy testing.
-3. pnpm workspace; TypeORM; `ws` via `@nestjs/platform-ws`; UUIDv7 ids.
+2. Local dev: Postgres 16 via Homebrew (installed); Docker only for deploy testing.
+3. pnpm workspace; TypeORM; `ws` via `@nestjs/platform-ws`; UUIDv7 ids; Nest 12 / ESM / Vitest.
 4. One live tunnel per subdomain; newest connection wins.
 5. Mock rule beats the tunnel (mocked requests aren't forwarded).
 6. 25 s local response timeout; 20 in-flight requests per tunnel.
 7. Anonymous subs may set only `offline_status` and a tiny `offline_body`; no arbitrary custom bodies beyond that.
-8. Brand/visual direction: playful-minimal developer tool (the "nanana" name and your ◡̈ vibe), dark-first with light mode.
-9. Repo initialized with `git init` in `/Users/neto/nanana.lat`; private on GitHub when you're ready.
+8. The dashboard's live stream uses `fetch` streaming (Authorization header), not `EventSource`, so tokens never go in URLs.
+9. No DNSSEC on the zone for v1; no analytics or telemetry in the CLI or web app.
+10. Public releases repo name: `erostalevi/nanana-releases` (change on request).
