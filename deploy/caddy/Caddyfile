@@ -4,7 +4,6 @@
 #   *.nanana.lat                  (api + webhook ingress, wildcard)
 #
 # Env: HOSTED_ZONE_ID, AWS_REGION (set in docker-compose.yml).
-
 {
 	# Wildcard certs need DNS-01; applying it globally covers every site below.
 	acme_dns route53 {
@@ -60,9 +59,7 @@
 }
 
 (spa) {
-	import security_headers
 	import spa_headers
-	import access_log
 	encode zstd gzip
 	root * /srv/www
 
@@ -79,9 +76,10 @@
 # ---- apex and www: landing, docs, account pages, CLI installer ------------------------
 
 nanana.lat, www.nanana.lat {
+	import security_headers
+	import access_log
+
 	handle /install.sh {
-		import security_headers
-		import access_log
 		root * /srv/dl
 		rewrite * /install.sh
 		header Content-Type "text/plain; charset=utf-8"
@@ -97,6 +95,8 @@ nanana.lat, www.nanana.lat {
 # ---- dashboards: <slug>.tools.nanana.lat ---------------------------------------------
 
 *.tools.nanana.lat {
+	import security_headers
+	import access_log
 	import spa
 }
 

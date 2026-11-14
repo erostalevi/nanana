@@ -10,7 +10,7 @@ set -euo pipefail
 REGION="us-east-1"
 PROFILE_ARGS=()
 if [[ -n "${AWS_PROFILE:-}" ]]; then PROFILE_ARGS=(--profile "$AWS_PROFILE"); fi
-aws_() { aws "${PROFILE_ARGS[@]}" --region "$REGION" "$@"; }
+aws_() { aws ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} --region "$REGION" "$@"; }
 
 ACCOUNT_ID="$(aws_ sts get-caller-identity --query Account --output text)"
 BUCKET="nanana-tfstate-${ACCOUNT_ID}"

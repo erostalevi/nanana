@@ -87,7 +87,7 @@ resource "aws_vpc_security_group_ingress_rule" "https_v6" {
 
 resource "aws_vpc_security_group_egress_rule" "all_v4" {
   security_group_id = aws_security_group.app.id
-  description       = "Outbound (ECR, S3, SES, SSM, GitHub, Let's Encrypt, webhook replays)"
+  description       = "Outbound (ECR, S3, SES, SSM, GitHub, LetsEncrypt, webhook replays)"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
