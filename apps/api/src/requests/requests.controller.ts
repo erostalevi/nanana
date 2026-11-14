@@ -1,10 +1,11 @@
-import { Controller, Delete, Get, HttpCode, Inject, Param, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
 import { q } from '../db/query.js';
 import type { Request } from 'express';
 import { DataSource } from 'typeorm';
 import { AccessService } from '../auth/access.service.js';
 import { badRequest, notFound } from '../common/errors.js';
 import { EventsService } from '../events/events.service.js';
+import { ReplayService } from '../replay/replay.service.js';
 import { RequestsService } from './requests.service.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -16,6 +17,7 @@ export class RequestsController {
     @Inject(AccessService) private readonly access: AccessService,
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(EventsService) private readonly events: EventsService,
+    @Inject(ReplayService) private readonly replays: ReplayService,
   ) {}
 
   private async resolve(req: Request, id: string) {
@@ -41,5 +43,13 @@ export class RequestsController {
   async remove(@Req() req: Request, @Param('id') id: string) {
     const sub = await this.resolve(req, id);
     if (await this.requests.remove(sub, id)) this.events.emit(sub.slug, 'request.deleted', { id });
+  }
+
+  @Post(':id/replay')
+  @HttpCode(201)
+  async replay(@Req() req: Request, @Param('id') id: string, @Body() body: { target?: unknown; overrideHeaders?: unknown }) {
+    const sub = await this.resolve(req, id);
+    const target = this.replays.parseTarget(body?.target);
+    return this.replays.replay(sub, id, target, body?.overrideHeaders);
   }
 }

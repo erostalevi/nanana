@@ -136,6 +136,11 @@ Text frames are JSON with `t`; binary frames carry bodies:
 
 Any method/path. Responses as in SPEC §5. Extra: unknown slug `404`, expired slug (tombstoned custom name) `410`, oversize `413`, rate limited `429`.
 
+## Admin (read-only, owner only)
+
+`GET /admin/stats` (session of an account whose email is in `ADMIN_EMAILS`; 403 otherwise) -> `{ accounts: number, subdomains: { total, active, cold, anonymous, custom }, tunnelsOnline: number, capturedRequests: number, requestsLastHour: number, uptimeSeconds: number, version: string }`.
+`GET /auth/providers` (public) -> `{ github: boolean, google: boolean, magic: true }`.
+
 ## Misc
 
 `GET /healthz` -> `{ "ok": true }`. `GET /version` -> `{ "version": "x.y.z", "minCliProtocol": 1 }`.

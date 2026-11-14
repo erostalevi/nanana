@@ -6,6 +6,7 @@ import { HealthController } from './health/health.controller.js';
 import { IngressService } from './ingress/ingress.service.js';
 import { LifecycleService } from './lifecycle/lifecycle.service.js';
 import { MocksService } from './mocks/mocks.service.js';
+import { ReplayService } from './replay/replay.service.js';
 import { RequestsController } from './requests/requests.controller.js';
 import { RequestsService } from './requests/requests.service.js';
 import { SubdomainsController } from './subdomains/subdomains.controller.js';
@@ -23,6 +24,7 @@ import { TunnelService } from './tunnel/tunnel.service.js';
     SubdomainsService,
     AccessService,
     MocksService,
+    ReplayService,
     RequestsService,
     IngressService,
     LifecycleService,
