@@ -4,6 +4,7 @@ import { AccessService, bearer } from '../auth/access.service.js';
 import { ApiError, badRequest, notFound, unauthorized } from '../common/errors.js';
 import { sha256 } from '../common/crypto.js';
 import { publicUrls, APP_CONFIG, type AppConfig } from '../config/app-config.js';
+import { isLoadtest } from '../common/loadtest.js';
 import { MocksService } from '../mocks/mocks.service.js';
 import { RequestsService } from '../requests/requests.service.js';
 import { EventsService } from '../events/events.service.js';
@@ -33,6 +34,7 @@ export class SubdomainsController {
       plan: p.kind === 'account' ? p.plan : null,
       name,
       ip,
+      skipIpLimit: isLoadtest(this.cfg, req),
     });
     const subdomain = await this.subs.dto(row);
     return { subdomain, token, dashboardUrlWithToken: `${publicUrls(this.cfg, row.slug).dashboardUrl}/#t=${token}` };

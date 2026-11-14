@@ -81,7 +81,7 @@ jobs:
       - if: steps.detect.outputs.present == 'true'
         run: pnpm --filter web build
       - if: steps.detect.outputs.present == 'true'
-        run: pnpm --filter web test --if-present
+        run: pnpm --filter web --if-present test
 
   cli:
     name: CLI tests
