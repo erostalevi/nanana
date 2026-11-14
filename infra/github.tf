@@ -174,6 +174,7 @@ data "aws_iam_policy_document" "gh_plan" {
       "cloudwatch:List*",
       "budgets:ViewBudget",
       "budgets:Describe*",
+      "budgets:ListTagsForResource",
       "dlm:Get*",
       "lambda:Get*",
       "lambda:List*",

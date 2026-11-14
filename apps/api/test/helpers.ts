@@ -3,7 +3,11 @@ import { DataSource } from 'typeorm';
 import request from 'supertest';
 import http from 'node:http';
 
-process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://localhost:5432/nanana_test';
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? 'postgres://localhost:5432/nanana_test';
+// These tests TRUNCATE tables: refuse to run against anything that is not clearly a test database.
+if (!/\/[^/?]*test[^/?]*(\?|$)/i.test(process.env.DATABASE_URL)) {
+  throw new Error(`Refusing to run e2e tests against ${process.env.DATABASE_URL.replace(/:\/\/.*@/, '://***@')}: the database name must contain "test".`);
+}
 process.env.BASE_DOMAIN = 'localhost';
 process.env.RUN_JOBS = 'false';
 process.env.PORT = '0';
