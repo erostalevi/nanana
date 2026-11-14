@@ -245,12 +245,22 @@ Behavior:
 
 ## 14. Infra and deploy
 
-- **Cost target (us-east-1, on-demand):** EC2 `t4g.micro` ~$6.1 + public IPv4 ~$3.65 + 20 GB gp3 ~$1.6 + Route 53 zone $0.50 + S3/ECR/SES pennies = **~$12/mo**. Swap file (1 GB) because 1 GB RAM is tight; resize to `t4g.small` (+~$6) if needed. A 1-yr Compute Savings Plan would cut the instance cost later.
+- **Cost target (us-east-1, on-demand):** EC2 `t3.micro` (x86, so CI builds plain Docker images on free runners) ~$7.6 + public IPv4 ~$3.65 + 20 GB root gp3 ~$1.6 + 10 GB data gp3 ~$0.8 + Route 53 zone $0.50 + S3 backups/ECR/SES ~$1 = **~$15/mo**. 1 GB RAM is tight: 1 GB swap file; credit mode set to `standard` (not `unlimited`) so a CPU spike can never produce surprise bills. Resize to `t3.small` (+~$7.6) if needed. A 1-yr Savings Plan can cut the instance cost later.
+- **Data safety (priority over uptime; downtime is acceptable, data loss is not):**
+  - Postgres data lives on a **separate EBS data volume** (`DeleteOnTermination=false`, termination protection on, `prevent_destroy` in Terraform), so replacing the instance keeps the data.
+  - **Continuous WAL archiving to S3 (WAL-G)** + weekly base backups: point-in-time recovery to any second within 30 days. Backup bucket: versioning on, encrypted, object-lock/lifecycle 30 days, public access blocked, bucket policy denies deletes except by a break-glass role.
+  - **Daily EBS snapshots** via Data Lifecycle Manager (7 daily, 4 weekly).
+  - Optional later: replicate the backup bucket to a second region.
+  - A **restore drill** script (`infra/scripts/restore-drill.sh`) restores the latest backup into a scratch Postgres and checks account row counts; run before launch and monthly.
+  - Captured webhook payloads are ephemeral by design; accounts, identities, tokens, and subdomain ownership are the data that must not be lost.
+- **Secrets:** SSM Parameter Store SecureString under `/nanana/prod/*`; the deploy script renders `.env` on the box from them. No secrets are stored in GitHub (OIDC only).
+- **Environments:** prod only on AWS. Local dev uses `*.localhost`; PR CI runs e2e against a throwaway Postgres container.
+- **Guards:** AWS Budget alarm at $20/mo; IMDSv2 required with hop limit 1; security group allows only 80/443 (no SSH).
 - **IaC:** Terraform in `infra/`, state in an S3 bucket (native S3 locking). Resources: EC2 + EIP + SG (80/443 only, no SSH), IAM instance role (SSM, ECR pull, S3 backups, Route 53 DNS-01 for Caddy), ECR repo, S3 backup bucket, Route 53 zone `nanana.lat`, GitHub OIDC provider + deploy roles.
 - **Deploys:** PRs into `main` run CI (tests, build, `terraform plan`) with a read-only OIDC role. Merge/push to `main` builds images, pushes to ECR, then deploys via **SSM Run Command** (`docker compose pull && up -d`), using an OIDC role trusted only for `repo:erostalevi/nanana:ref:refs/heads/main`. No SSH, no long-lived AWS keys in GitHub. The existing `erostalevi-landing-github-deploy` role belongs to another repo and is not reused.
 - **VM:** Ubuntu/Amazon Linux arm64, Docker Compose. Elastic IP; Route 53 records: `A nanana.lat`, `A *.nanana.lat`, `A *.tools.nanana.lat`, `A api.nanana.lat`, `www` CNAME. SES: verified `nanana.lat` domain with DKIM/SPF/DMARC (+ production access request, since sandbox only mails verified addresses).
 - **Caddy** image built with `caddy-dns/route53` (IAM user scoped to the hosted zone's TXT records for DNS-01).
-- **Compose services:** `caddy`, `api`, `postgres:16` (volume), `backup` (nightly `pg_dump` to S3, 7 day retention; data is ephemeral but accounts aren't).
+- **Compose services:** `caddy`, `api`, `postgres:16` (data on the dedicated EBS volume, WAL-G archiving to S3; see Data safety above).
 - **Config via `.env`/AWS SSM:** `BASE_DOMAIN`, `DATABASE_URL`, `SESSION_SECRET`, `ENCRYPTION_KEY`, `IP_HASH_SECRET`, OAuth client IDs/secrets, `SES_*`, limits overrides.
 - **CI/CD (GitHub Actions):** lint+test on PR (api, web, cli); on tag: build and push images to GHCR, GoReleaser CLI release; deploy job SSHes to the VM and runs `docker compose pull && up -d` (migrations run on api start).
 - **Observability:** structured JSON logs (pino), `/healthz`, basic Prometheus metrics (`/metrics` internal only), CloudWatch alarm on instance status; uptime check on `api.nanana.lat/healthz`.
