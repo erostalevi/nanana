@@ -1,0 +1,42 @@
+# GoReleaser config: `goreleaser release --clean` (publishes to the public releases repo).
+version: 2
+project_name: nanana
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: nanana
+    main: .
+    binary: nanana
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: nanana
+    ids: [nanana]
+    formats: [tar.gz]
+    name_template: "nanana_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: erostalevi
+    name: nanana-releases

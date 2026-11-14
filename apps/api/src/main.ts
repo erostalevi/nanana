@@ -1,13 +1,14 @@
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module.js';
+import { Logger } from '@nestjs/common';
+import { createApp } from './bootstrap.js';
 import { loadConfig } from './config/app-config.js';
 
-try { process.loadEnvFile(); } catch { /* no .env file, use real env */ }
-
-async function bootstrap() {
-  const cfg = loadConfig();
-  const app = await NestFactory.create(AppModule);
-  if (cfg.trustProxy) (app.getHttpAdapter().getInstance() as { set: (k: string, v: unknown) => void }).set('trust proxy', true);
-  await app.listen(cfg.port);
+try {
+  process.loadEnvFile();
+} catch {
+  /* no .env file, use real env */
 }
-await bootstrap();
+
+const cfg = loadConfig();
+const app = await createApp();
+await app.listen(cfg.port);
+new Logger('Bootstrap').log(`nanana api listening on :${cfg.port} (base domain ${cfg.baseDomain})`);
