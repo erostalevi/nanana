@@ -87,6 +87,8 @@ export function Login() {
 }
 
 const verifying = new Map<string, Promise<unknown>>();
+/** Post-login destination per token, read once (React StrictMode runs the effect twice in dev). */
+const destinations = new Map<string, string>();
 
 export function AuthVerify() {
   const [params] = useSearchParams();
@@ -104,10 +106,12 @@ export function AuthVerify() {
       p = api<{ account: unknown }>('/auth/magic/verify', { method: 'POST', body: { token } });
       verifying.set(token, p);
     }
+    if (!destinations.has(token)) destinations.set(token, takeNext() ?? '/account');
+    const dest = destinations.get(token)!;
     p.then(
       () => {
         void qc.invalidateQueries({ queryKey: ['me'] });
-        nav(takeNext() ?? '/account', { replace: true });
+        nav(dest, { replace: true });
       },
       (e) => setError(errorMessage(e)),
     );

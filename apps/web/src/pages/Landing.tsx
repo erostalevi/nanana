@@ -31,7 +31,7 @@ export function Landing() {
   return (
     <>
       <section className="mx-auto grid max-w-6xl gap-10 px-4 pb-16 pt-14 sm:pt-20 lg:grid-cols-[1.1fr_1fr] lg:items-center">
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <p className="font-mono text-sm text-accent">nanana.lat</p>
           <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">Catch webhooks.<br />Poke them.<br /><span className="text-accent">Replay them at localhost.</span></h1>
           <p className="max-w-xl text-lg text-muted">Throwaway endpoints with a live inspector, HMAC checks, response mocking and a tunnel to your machine. No sign-up, nothing to install to start.</p>
@@ -73,13 +73,13 @@ export function Landing() {
 
       <section className="mx-auto max-w-6xl px-4 py-16" aria-labelledby="cli">
         <div className="grid gap-8 lg:grid-cols-2">
-          <div>
+          <div className="min-w-0">
             <h2 id="cli" className="mb-3 text-2xl font-semibold tracking-tight">Tunnel to your machine</h2>
             <p className="mb-4 text-muted">The <code className="font-mono text-fg">nanana</code> CLI is one static binary for macOS, Linux and Windows. It proxies real webhooks to your local app and relays the app's response back to the sender.</p>
             <CodeBlock label="Install" code="curl -fsSL https://nanana.lat/install.sh | sh" />
             <p className="mt-4 text-sm text-muted"><Link to="/docs#cli" className="link">CLI reference</Link></p>
           </div>
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <CodeBlock label="Forward to localhost:3000" code="nanana -t=nnt_yourtoken -p=3000" />
             <CodeBlock label="Forward to another host on your network" code="nanana -t=nnt_yourtoken -p=8080 -h=192.168.1.20" />
             <p className="text-xs text-faint"><code>-t</code> token, <code>-p</code> port, <code>-h</code> target host (default 127.0.0.1).</p>

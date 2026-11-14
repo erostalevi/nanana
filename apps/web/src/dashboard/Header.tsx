@@ -53,6 +53,7 @@ export function Header({ sub, tunnelTarget, status, onSettings, onMock, onDelete
   const ctx = useDash();
   return (
     <header className="border-b border-line bg-panel">
+      <h1 className="sr-only">Webhook inspector for {sub.slug}</h1>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5 sm:px-4">
         <a href={ctx.apex} className="shrink-0" aria-label="nanana home"><Logo size="sm" /></a>
         <div className="flex min-w-0 flex-1 basis-64 items-center gap-2">

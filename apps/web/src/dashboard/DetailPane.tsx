@@ -115,10 +115,10 @@ function RequestTab({ d }: { d: RequestDetail }) {
       {pairs.length > 0 && (
         <Section title="Query string">
           <p className="mb-2 font-mono text-xs text-muted">{pathname}</p>
-          <KvTable rows={pairs} />
+          <KvTable rows={pairs} label="Query parameters" />
         </Section>
       )}
-      <Section title={`Headers (${headerRows(d.headers).length})`}><KvTable rows={headerRows(d.headers)} empty="No headers." /></Section>
+      <Section title={`Headers (${headerRows(d.headers).length})`}><KvTable rows={headerRows(d.headers)} empty="No headers." label="Request headers" /></Section>
       <Section title="Body"><BodyViewer body={d.body} contentType={headerValue(d.headers, 'content-type') ?? d.contentType} /></Section>
     </>
   );
@@ -138,7 +138,7 @@ function ResponseTab({ d }: { d: RequestDetail }) {
           {d.forwardError && (<><dt className="text-muted">Forward error</dt><dd className="font-mono text-bad">{d.forwardError}</dd></>)}
         </dl>
       </Section>
-      <Section title="Response headers"><KvTable rows={headerRows(d.responseHeaders)} empty="No headers recorded." /></Section>
+      <Section title="Response headers"><KvTable rows={headerRows(d.responseHeaders)} empty="No headers recorded." label="Response headers" /></Section>
       <Section title="Response body">
         <BodyViewer body={d.responseBody} contentType={headerValue(d.responseHeaders, 'content-type')} emptyLabel="Empty response body." />
         {d.responseBody?.truncated && <p className="mt-2 text-xs text-faint">Stored response was truncated (only the first 1 MB is kept; the sender got the full response).</p>}
@@ -188,7 +188,7 @@ function ReplaysTab({ replays }: { replays: Replay[] }) {
           </button>
           {open === r.id && (
             <div className="space-y-3 border-t border-line p-3">
-              <Section title="Response headers"><KvTable rows={headerRows(r.responseHeaders)} empty="No headers." /></Section>
+              <Section title="Response headers"><KvTable rows={headerRows(r.responseHeaders)} empty="No headers." label="Replay response headers" /></Section>
               <Section title="Response body"><BodyViewer body={r.responseBody} contentType={headerValue(r.responseHeaders, 'content-type')} emptyLabel={r.error ? 'No response (see error).' : 'Empty response body.'} /></Section>
             </div>
           )}

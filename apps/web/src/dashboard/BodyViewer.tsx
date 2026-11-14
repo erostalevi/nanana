@@ -11,10 +11,10 @@ export function headerValue(h: Headers | null | undefined, name: string): string
   return null;
 }
 
-export function KvTable({ rows, empty = 'Nothing here.' }: { rows: [string, string][]; empty?: string }) {
+export function KvTable({ rows, empty = 'Nothing here.', label = 'Table' }: { rows: [string, string][]; empty?: string; label?: string }) {
   if (!rows.length) return <p className="text-sm text-faint">{empty}</p>;
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div tabIndex={0} role="region" aria-label={label} className="overflow-x-auto rounded-lg border border-line">
       <table className="w-full text-left font-mono text-[12.5px]">
         <tbody>
           {rows.map(([k, v], i) => (
@@ -131,7 +131,7 @@ export function BodyViewer({ body, contentType, emptyLabel = 'No body.' }: { bod
         <div className="flex items-center gap-2 text-xs text-faint">{controls}{size && <span>{size}</span>}</div>
         <CopyButton text={copy} label="Copy body" />
       </div>
-      <div className="max-h-[60vh] overflow-auto rounded-lg border border-line bg-bg p-3" data-testid="body-view" data-kind={view.kind}>{content}</div>
+      <div tabIndex={0} role="region" aria-label="Body content" className="max-h-[60vh] overflow-auto rounded-lg border border-line bg-bg p-3" data-testid="body-view" data-kind={view.kind}>{content}</div>
     </div>
   );
 }

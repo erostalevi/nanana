@@ -30,7 +30,7 @@ function useIsDesktop(): boolean {
 function Screen({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
-      <div className="flex items-center justify-between px-4 py-3"><Logo size="sm" /><ThemeToggle /></div>
+      <header className="flex items-center justify-between px-4 py-3"><Logo size="sm" /><ThemeToggle /></header>
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-4 pb-24">
         <h1 className="mb-3 text-2xl font-semibold tracking-tight">{title}</h1>
         <div className="space-y-4 text-sm leading-6 text-muted">{children}</div>
@@ -60,6 +60,15 @@ function NeedAccess({ apex, hadToken }: { apex: string; hadToken: boolean }) {
 
 export function DashboardApp({ slug, base, apex }: { slug: string; base: string; apex: string }) {
   const [token] = useState(() => consumeFragmentToken(slug));
+  // Pasting a full dashboard link (with #t=...) into a tab that already shows this dashboard only changes the
+  // hash, which does not reload the page: reload so the new token is picked up and stripped.
+  useEffect(() => {
+    const onHash = () => {
+      if (/(^|[#&])t=nn[ta]_/.test(window.location.hash)) window.location.reload();
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const ctx = useMemo<DashCtx>(() => ({ slug, token, base, apex }), [slug, token, base, apex]);
   const subQ = useQuery<Subdomain, ApiError>({
     queryKey: qk.sub(slug),
@@ -136,7 +145,7 @@ function Dashboard({ sub, onGone, onDenied }: { sub: Subdomain; onGone: (w: 'exp
     <div className="flex h-screen flex-col">
       <Header sub={sub} tunnelTarget={tunnelTarget} status={status} onSettings={() => setDialog('settings')} onMock={() => setDialog('mock')} onDelete={() => setDialog('delete')} />
       <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(340px,420px)_1fr]">
-        <section aria-label="Requests" className={`min-h-0 flex-col border-r border-line ${selectedReq ? 'hidden lg:flex' : 'flex'}`}>
+        <section aria-label="Requests" className={`min-h-0 min-w-0 flex-col border-r border-line ${selectedReq ? 'hidden lg:flex' : 'flex'}`}>
           {reqQ.isLoading ? <div className="p-6"><Spinner label="Loading requests" /></div> : reqQ.isError ? <p className="p-6 text-sm text-bad">Could not load requests: {errorMessage(reqQ.error)}</p> : (
             <RequestList requests={requests} selectedId={selected} onSelect={setSelected} empty={<EmptyState url={sub.url} />} />
           )}

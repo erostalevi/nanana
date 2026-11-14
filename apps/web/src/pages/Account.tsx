@@ -132,7 +132,7 @@ export function Account() {
         <form className="mt-4 flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
           <div className="min-w-[14rem] flex-1">
             <label className="label" htmlFor="new-name">New endpoint (optional custom name)</label>
-            <input id="new-name" className="input font-mono" placeholder="my-app (leave empty for a random name)" value={name} onChange={(e) => setName(e.target.value)} pattern="[a-zA-Z0-9-]{3,32}" title="3 to 32 letters, digits or hyphens" />
+            <input id="new-name" className="input font-mono" placeholder="my-app (leave empty for a random name)" value={name} onChange={(e) => setName(e.target.value)} pattern="[a-zA-Z0-9\-]{3,32}" title="3 to 32 letters, digits or hyphens" />
           </div>
           <button className="btn btn-primary" disabled={create.isPending}>Create endpoint</button>
         </form>

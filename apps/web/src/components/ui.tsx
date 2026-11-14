@@ -1,5 +1,5 @@
 import { Check, Copy } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
 export function Logo({ size = 'md', className = '' }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
   const px = size === 'lg' ? 40 : size === 'sm' ? 20 : 26;
@@ -71,7 +71,7 @@ export function CodeBlock({ code, label, className = '' }: { code: string; label
           <CopyButton text={code} />
         </div>
       )}
-      <pre className={`overflow-x-auto p-3 text-[13px] leading-6 text-fg ${label ? '' : 'pr-20'}`}><code>{code}</code></pre>
+      <pre tabIndex={0} role="region" aria-label={label ?? 'Code'} className={`overflow-x-auto p-3 text-[13px] leading-6 text-fg ${label ? '' : 'pr-20'}`}><code>{code}</code></pre>
       {!label && <div className="absolute right-2 top-2"><CopyButton text={code} /></div>}
     </div>
   );
@@ -97,31 +97,47 @@ export function Spinner({ label = 'Loading' }: { label?: string }) {
 
 const FOCUSABLE = 'a[href],button:not([disabled]),textarea,input:not([disabled]),select,[tabindex]:not([tabindex="-1"])';
 
+/** Open modals, innermost last: only the top one reacts to the keyboard. */
+const modalStack: object[] = [];
+
 export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const first = ref.current?.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? ref.current)?.focus();
     return () => prev?.focus?.();
   }, []);
-  const onKey = useCallback(
-    (e: React.KeyboardEvent) => {
+  // Document-level so Escape and the Tab trap keep working when the focused element disappears (focus falls to <body>).
+  useEffect(() => {
+    const me = {};
+    modalStack.push(me);
+    const onKey = (e: KeyboardEvent) => {
+      const root = ref.current;
+      if (!root || modalStack[modalStack.length - 1] !== me) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
-      } else if (e.key === 'Tab' && ref.current) {
-        const els = Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+        closeRef.current();
+      } else if (e.key === 'Tab') {
+        const els = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
         if (!els.length) return;
         const f = els[0]!;
         const l = els[els.length - 1]!;
-        if (e.shiftKey && document.activeElement === f) (e.preventDefault(), l.focus());
-        else if (!e.shiftKey && document.activeElement === l) (e.preventDefault(), f.focus());
+        const active = document.activeElement;
+        if (!root.contains(active)) (e.preventDefault(), f.focus());
+        else if (e.shiftKey && active === f) (e.preventDefault(), l.focus());
+        else if (!e.shiftKey && active === l) (e.preventDefault(), f.focus());
       }
-    },
-    [onClose],
-  );
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      modalStack.splice(modalStack.indexOf(me), 1);
+    };
+  }, []);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
@@ -130,7 +146,6 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onKeyDown={onKey}
         className={`card max-h-[92vh] w-full overflow-y-auto rounded-b-none p-5 shadow-2xl sm:rounded-b-xl ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}
       >
         <div className="mb-4 flex items-center justify-between gap-4">

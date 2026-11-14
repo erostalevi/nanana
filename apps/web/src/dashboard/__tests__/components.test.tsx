@@ -56,12 +56,12 @@ describe('RequestList with live stream events', () => {
     expect(screen.getByText('empty state')).toBeInTheDocument();
 
     await emit(qc, { type: 'request.created', data: req('a') });
-    const row = await screen.findByRole('button', { name: 'POST /hook/a' });
+    const row = await screen.findByRole('button', { name: /^POST\s*\/hook\/a/ });
     expect(row).toHaveTextContent('...'); // response pending
     expect(screen.getByText('Latest request: POST /hook/a')).toBeInTheDocument();
 
     await emit(qc, { type: 'request.updated', data: req('a', { responseStatus: 200, answeredBy: 'tunnel', latencyMs: 31, signature: 'pass' }) });
-    expect(screen.getByRole('button', { name: 'POST /hook/a' })).toHaveTextContent('200');
+    expect(screen.getByRole('button', { name: /^POST\s*\/hook\/a/ })).toHaveTextContent('200');
     expect(screen.getByText('Signature valid')).toBeInTheDocument();
     expect(screen.getByText('Answered by your tunnel')).toBeInTheDocument();
 
@@ -71,19 +71,19 @@ describe('RequestList with live stream events', () => {
     expect(items[0]).toHaveTextContent('/hook/b'); // newest first
 
     await emit(qc, { type: 'request.deleted', data: { id: 'a' } });
-    expect(screen.queryByRole('button', { name: 'POST /hook/a' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^POST\s*\/hook\/a/ })).not.toBeInTheDocument();
   });
 
   it('hides preflights by default and filters by text', async () => {
     qc.setQueryData(qk.requests(SLUG), [req('p', { method: 'OPTIONS', isPreflight: true, answeredBy: 'preflight', responseStatus: 204 }), req('q', { path: '/pay' }), req('r', { method: 'GET', path: '/health' })]);
     const user = userEvent.setup();
     render(wrap(qc, <LiveList />));
-    expect(screen.queryByRole('button', { name: 'OPTIONS /hook/p' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^OPTIONS\s*\/hook\/p/ })).not.toBeInTheDocument();
     await user.click(screen.getByLabelText(/Preflights/));
-    expect(screen.getByRole('button', { name: 'OPTIONS /hook/p' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^OPTIONS\s*\/hook\/p/ })).toBeInTheDocument();
     await user.type(screen.getByLabelText(/Filter requests/), 'get');
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'GET /health' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^GET\s*\/health/ })).toBeInTheDocument();
     await user.clear(screen.getByLabelText(/Filter requests/));
     await user.type(screen.getByLabelText(/Filter requests/), 'zzz');
     expect(screen.getByText('No requests match this filter.')).toBeInTheDocument();
@@ -96,7 +96,7 @@ describe('RequestList with live stream events', () => {
     const user = userEvent.setup();
     const { container } = render(wrap(qc, <LiveList onSelect={onSelect} />));
     expect(container.querySelector('img')).toBeNull();
-    await user.click(screen.getByRole('button', { name: `POST ${evil}` }));
+    await user.click(screen.getByRole('button', { name: (n: string) => n.replace(/\s+/g, '').startsWith(`POST${evil}`.replace(/\s+/g, '')) }));
     expect(onSelect).toHaveBeenCalledWith('x');
   });
 

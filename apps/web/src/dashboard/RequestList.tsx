@@ -12,8 +12,7 @@ const Row = memo(function Row({ r, selected, now, fresh, onSelect }: { r: Reques
         type="button"
         onClick={() => onSelect(r.id)}
         aria-current={selected ? 'true' : undefined}
-        aria-label={`${r.method} ${r.path}`}
-        className={`flex w-full flex-col gap-1 border-b border-line px-3 py-2.5 text-left transition hover:bg-raised ${selected ? 'bg-raised shadow-[inset_3px_0_0_rgb(var(--accent))]' : ''} ${r.isPreflight ? 'opacity-70' : ''}`}
+        className={`flex w-full flex-col gap-1 border-b border-line px-3 py-2.5 text-left transition hover:bg-raised ${selected ? 'bg-raised shadow-[inset_3px_0_0_rgb(var(--accent))]' : ''} ${r.isPreflight ? 'italic' : ''}`}
       >
         <span className="flex items-center gap-2">
           <MethodBadge method={r.method} />

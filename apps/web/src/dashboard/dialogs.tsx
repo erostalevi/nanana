@@ -22,6 +22,8 @@ export function SettingsDialog({ sub, onClose }: { sub: Subdomain; onClose: () =
     mutationFn: (patch: Record<string, unknown>) => api<Subdomain>(`/subdomains/${slug}`, { method: 'PATCH', token, body: patch }),
     onSuccess: (s) => {
       qc.setQueryData(qk.sub(slug), s);
+      // Signature results of existing captures depend on the HMAC config: refresh the list.
+      void qc.invalidateQueries({ queryKey: qk.requests(slug) });
       onClose();
     },
   });
