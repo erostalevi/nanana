@@ -1,8 +1,10 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { buildCurl, curlHeaders, shellQuote } from '../curl';
 
 /** Round-trips a quoted string through a real shell to prove the escaping is right. */
+const hasShell = (sh: string): boolean => spawnSync(sh, ['-c', 'true']).status === 0;
+
 function viaShell(shell: 'bash' | 'zsh', s: string): string {
   return execFileSync(shell, ['-c', `printf '%s' ${shellQuote(s)}`], { encoding: 'utf8' });
 }
@@ -23,6 +25,7 @@ describe('shellQuote', () => {
     expect(shellQuote('café\n')).toBe("$'café\\n'");
   });
   it.each(['bash', 'zsh'] as const)('round-trips nasty strings through %s', (sh) => {
+    if (!hasShell(sh)) return; // zsh is not installed on every CI runner
     const samples = ["plain", "it's a 'test'", 'line1\nline2\r\n', '\ttab\\back\\slash', '$HOME `id` $(id) "dq"', 'café ✓ \u{1F600}', 'a\x01b\x1fc\x7fd', '!history ! #hash', ''];
     for (const s of samples) expect(viaShell(sh, s)).toBe(s);
   });
