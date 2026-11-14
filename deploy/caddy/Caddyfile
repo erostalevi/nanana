@@ -6,10 +6,16 @@
 # Env: AWS_REGION (set in docker-compose.yml). The hosted zone id is literal: the route53
 # plugin does not expand {env.*} placeholders in its own config.
 {
-	# Wildcard certs need DNS-01; applying it globally covers every site below.
-	acme_dns route53 {
-		region {env.AWS_REGION}
-		hosted_zone_id Z04632171NY87UGQ81RCZ
+	# Wildcard certs need DNS-01. The TXT record is created through the Route 53 API, then we
+	# wait for it to be visible on the authoritative servers before asking Let's Encrypt to check.
+	cert_issuer acme {
+		dns route53 {
+			region {env.AWS_REGION}
+			hosted_zone_id Z04632171NY87UGQ81RCZ
+		}
+		propagation_delay 30s
+		propagation_timeout 5m
+		resolvers 1.1.1.1 8.8.8.8
 	}
 
 	# HTTP/3 needs UDP 443, which the security group does not open.
