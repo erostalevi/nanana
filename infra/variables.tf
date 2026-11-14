@@ -69,3 +69,9 @@ variable "backup_retention_days" {
     error_message = "backup_retention_days must be at least 38 to guarantee 30 days of point-in-time recovery."
   }
 }
+
+variable "github_sub_prefix" {
+  description = "OIDC subject prefix of the repo. This repo uses GitHub immutable subjects (owner and repo numeric IDs), see `gh api repos/<repo>/actions/oidc/customization/sub`."
+  type        = string
+  default     = "repo:erostalevi@57099244/nanana@1457327117"
+}

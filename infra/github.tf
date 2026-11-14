@@ -39,7 +39,7 @@ data "aws_iam_policy_document" "gh_deploy_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_url}:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/main"]
+      values   = ["${var.github_sub_prefix}:ref:refs/heads/main"]
     }
   }
 }
@@ -59,7 +59,7 @@ data "aws_iam_policy_document" "gh_plan_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_url}:sub"
-      values   = ["repo:${var.github_repo}:pull_request"]
+      values   = ["${var.github_sub_prefix}:pull_request"]
     }
   }
 }
