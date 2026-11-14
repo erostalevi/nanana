@@ -136,6 +136,28 @@ Text frames are JSON with `t`; binary frames carry bodies:
 
 Any method/path. Responses as in SPEC §5. Extra: unknown slug `404`, expired slug (tombstoned custom name) `410`, oversize `413`, rate limited `429`.
 
+## Billing and plans (Pro)
+
+Plans: `free`, `pro` ($8/month or $80/year), plus two transitional account states: `pro_grace` (payment failed, still Pro limits for 7 days) and `lapsed` (subscription ended: endpoints are read-only for 30 days, then the account becomes `free`). See docs/PRO-PLAN.md.
+
+`account.plan` (in `/me`) is one of `free | pro | pro_grace | lapsed`.
+
+`GET /me` additionally returns `limits` with these keys (same shape as `plans[].limits` below):
+`{ maxActiveSubdomains, maxCustomNames, maxBodyBytes, ratePerMinute, retentionMaxRequests, retentionMaxAgeMs, retentionMaxBytes, tunnelsPerAccount, alwaysOn: boolean, reservedNames: boolean }` and `billing`:
+`{ enabled: boolean, status: 'none' | 'active' | 'past_due' | 'canceled', interval: 'month' | 'year' | null, currentPeriodEnd: string | null, cancelAtPeriodEnd: boolean, graceUntil: string | null, lapsedUntil: string | null }`.
+
+`Subdomain` additionally has `alwaysOn: boolean`, `readOnly: boolean` (lapsed owner: ingress answers 402 and stores nothing), `reserved: boolean` (custom name kept reserved while the owner is on Pro).
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/billing/plans` | none | | `{ enabled: boolean, currency: 'usd', plans: [{ id: 'free' \| 'pro', name: string, priceMonthlyCents: number, priceYearlyCents: number \| null, limits: Limits }] }` (`enabled` is false when Stripe is not configured) |
+| GET | `/billing` | account | | the `billing` object above plus `plan` |
+| POST | `/billing/checkout` | account (session) | `{ interval: 'month' \| 'year' }` | `200 { url }` (redirect the browser to Stripe Checkout). `404 billing_disabled`, `409 already_subscribed` |
+| POST | `/billing/portal` | account (session) | | `200 { url }` (Stripe customer portal). `409 no_customer` |
+| POST | `/billing/webhook` | Stripe signature | raw Stripe event | `200 { received: true }` (idempotent by event id); `400 invalid_signature` |
+
+Extra error codes: ingress `402 endpoint_read_only` (lapsed owner); tunnel upgrade `403 tunnel_limit` (account already has its maximum simultaneous tunnels); `POST /subdomains` `403 limit_reached` now depends on the plan; `GET /me` etc. unchanged.
+
 ## Admin (read-only, owner only)
 
 `GET /admin/stats` (session of an account whose email is in `ADMIN_EMAILS`; 403 otherwise) -> `{ accounts: number, subdomains: { total, active, cold, anonymous, custom }, tunnelsOnline: number, capturedRequests: number, requestsLastHour: number, uptimeSeconds: number, version: string }`.
