@@ -3,12 +3,13 @@
 #   *.tools.nanana.lat            (dashboards, wildcard)
 #   *.nanana.lat                  (api + webhook ingress, wildcard)
 #
-# Env: HOSTED_ZONE_ID, AWS_REGION (set in docker-compose.yml).
+# Env: AWS_REGION (set in docker-compose.yml). The hosted zone id is literal: the route53
+# plugin does not expand {env.*} placeholders in its own config.
 {
 	# Wildcard certs need DNS-01; applying it globally covers every site below.
 	acme_dns route53 {
 		region {env.AWS_REGION}
-		hosted_zone_id {env.HOSTED_ZONE_ID}
+		hosted_zone_id Z04632171NY87UGQ81RCZ
 	}
 
 	# HTTP/3 needs UDP 443, which the security group does not open.
