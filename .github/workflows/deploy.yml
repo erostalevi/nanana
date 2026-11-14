@@ -1,0 +1,170 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # manual re-deploy (run it from main so the OIDC subject matches)
+
+# One deploy at a time; a newer push waits instead of cancelling a running deploy.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC: no long-lived AWS keys
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    name: Build, push, deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require deploy role variable
+        env:
+          ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE" ]; then
+            echo "::error::Repository variable AWS_DEPLOY_ROLE_ARN is not set (see docs/INFRA.md)."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/nanana-api:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/nanana-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build and push caddy (includes the web app)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/caddy/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/nanana-caddy:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/nanana-caddy:latest
+          cache-from: type=gha,scope=caddy
+          cache-to: type=gha,scope=caddy,mode=max
+
+      - name: Build and push postgres (WAL-G)
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/postgres
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/nanana-postgres:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/nanana-postgres:latest
+          cache-from: type=gha,scope=postgres
+          cache-to: type=gha,scope=postgres,mode=max
+
+      - name: Upload deploy files to S3
+        run: |
+          set -euo pipefail
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          bucket="nanana-artifacts-${account_id}"
+          prefix="s3://${bucket}/deploy/${GITHUB_SHA}"
+          aws s3 cp deploy/docker-compose.yml "${prefix}/docker-compose.yml"
+          aws s3 cp deploy/deploy.sh          "${prefix}/deploy.sh"
+          aws s3 cp deploy/render-env.sh      "${prefix}/render-env.sh"
+          aws s3 cp infra/scripts/restore-drill.sh "${prefix}/restore-drill.sh"
+          echo "BUCKET=${bucket}" >> "$GITHUB_ENV"
+
+      - name: Find the instance
+        run: |
+          set -euo pipefail
+          id="$(aws ec2 describe-instances \
+            --filters Name=tag:project,Values=nanana Name=tag:role,Values=app Name=instance-state-name,Values=running \
+            --query 'Reservations[].Instances[].InstanceId' --output text)"
+          if [ -z "$id" ] || [ "$(wc -w <<<"$id")" -ne 1 ]; then
+            echo "::error::Expected exactly one running instance tagged project=nanana,role=app, found: '$id'"
+            exit 1
+          fi
+          echo "INSTANCE_ID=$id" >> "$GITHUB_ENV"
+
+      - name: Deploy through SSM Run Command
+        run: |
+          set -euo pipefail
+          script="$(cat <<SCRIPT
+          set -euo pipefail
+          export AWS_DEFAULT_REGION=us-east-1
+          mkdir -p /opt/nanana
+          aws s3 cp --only-show-errors --recursive s3://${BUCKET}/deploy/${GITHUB_SHA}/ /opt/nanana/
+          chmod 0700 /opt/nanana/deploy.sh /opt/nanana/render-env.sh /opt/nanana/restore-drill.sh
+          /opt/nanana/deploy.sh ${GITHUB_SHA}
+          SCRIPT
+          )"
+          params="$(jq -n --arg c "$script" '{commands: [$c], executionTimeout: ["1500"]}')"
+          cmd_id="$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${GITHUB_SHA}" \
+            --timeout-seconds 1800 \
+            --parameters "$params" \
+            --query Command.CommandId --output text)"
+          echo "SSM command: $cmd_id"
+
+          status=""
+          for _ in $(seq 1 240); do
+            sleep 5
+            status="$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)"
+            case "$status" in
+              Success | Failed | Cancelled | TimedOut | Cancelling) break ;;
+            esac
+          done
+
+          echo "=== stdout ==="
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text || true
+          echo "=== stderr ==="
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent --output text || true
+
+          if [ "$status" != "Success" ]; then
+            echo "::error::SSM deploy finished with status: $status"
+            exit 1
+          fi
+
+      - name: Public health check
+        run: |
+          set -u
+          for i in $(seq 1 36); do
+            if curl -fsS --max-time 10 https://api.nanana.lat/healthz; then
+              echo
+              echo "healthy after attempt $i"
+              exit 0
+            fi
+            echo "attempt $i failed, retrying in 10s"
+            sleep 10
+          done
+          echo "::error::https://api.nanana.lat/healthz did not become healthy"
+          exit 1

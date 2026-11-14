@@ -64,12 +64,15 @@ export function CopyButton({ text, label = 'Copy', className = '', small = true,
 
 export function CodeBlock({ code, label, className = '' }: { code: string; label?: string; className?: string }) {
   return (
-    <div className={`group relative rounded-lg border border-line bg-bg ${className}`}>
-      {label && <div className="border-b border-line px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-faint">{label}</div>}
-      <pre className="overflow-x-auto p-3 pr-20 text-[13px] leading-6 text-fg"><code>{code}</code></pre>
-      <div className="absolute right-2 top-2" style={label ? { top: '2.1rem' } : undefined}>
-        <CopyButton text={code} />
-      </div>
+    <div className={`relative rounded-lg border border-line bg-bg ${className}`}>
+      {label && (
+        <div className="flex items-center justify-between border-b border-line py-1 pl-3 pr-1.5">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-faint">{label}</span>
+          <CopyButton text={code} />
+        </div>
+      )}
+      <pre className={`overflow-x-auto p-3 text-[13px] leading-6 text-fg ${label ? '' : 'pr-20'}`}><code>{code}</code></pre>
+      {!label && <div className="absolute right-2 top-2"><CopyButton text={code} /></div>}
     </div>
   );
 }

@@ -1,0 +1,60 @@
+name: Release CLI
+
+# Push a tag like cli-v0.1.0 to publish binaries to the PUBLIC releases repo
+# (erostalevi/nanana-releases) with GoReleaser. The release itself is tagged v0.1.0
+# there, which is what install.sh expects.
+#
+# Requires the repository secret RELEASES_TOKEN: a fine-grained personal access
+# token created by the repo owner with "Contents: read and write" on
+# erostalevi/nanana-releases only. It cannot be created by CI.
+on:
+  push:
+    tags:
+      - "cli-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require RELEASES_TOKEN
+        env:
+          TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Repository secret RELEASES_TOKEN is not set (see docs/INFRA.md)."
+            exit 1
+          fi
+
+      - name: Derive version from tag
+        run: |
+          version="${GITHUB_REF_NAME#cli-}"   # cli-v0.1.0 -> v0.1.0
+          case "$version" in v[0-9]*) ;; *) echo "::error::tag must look like cli-vX.Y.Z"; exit 1 ;; esac
+          echo "GORELEASER_CURRENT_TAG=$version" >> "$GITHUB_ENV"
+          # GoReleaser needs a plain semver tag on HEAD (local only, never pushed).
+          git tag "$version"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          workdir: cli
+          args: release --clean --config .goreleaser.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
