@@ -1,0 +1,110 @@
+# nanana production stack. Lives in /opt/nanana on the EC2 host, next to the
+# .env file rendered from SSM Parameter Store (deploy/render-env.sh).
+#
+# Memory budget (1 GB host + 1 GB swap): api 320m + postgres 280m + caddy 96m.
+#
+# IMAGE_TAG and ECR_REGISTRY are appended to .env by deploy.sh.
+name: nanana
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: ${ECR_REGISTRY:?ECR_REGISTRY not set}/nanana-postgres:${IMAGE_TAG:?IMAGE_TAG not set}
+    container_name: nanana-postgres
+    restart: unless-stopped
+    stop_grace_period: 60s
+    mem_limit: 280m
+    pids_limit: 200
+    environment:
+      POSTGRES_USER: nanana
+      POSTGRES_DB: nanana
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD not set}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # WAL-G (credentials come from the EC2 instance role via IMDS)
+      PGUSER: nanana
+      WALG_S3_PREFIX: s3://${BACKUP_BUCKET:?BACKUP_BUCKET not set}/pg16
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - /var/lib/nanana/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nanana -d nanana"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: ${ECR_REGISTRY:?ECR_REGISTRY not set}/nanana-api:${IMAGE_TAG:?IMAGE_TAG not set}
+    container_name: nanana-api
+    restart: unless-stopped
+    mem_limit: 320m
+    pids_limit: 300
+    env_file:
+      - /opt/nanana/.env
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=224
+    ports:
+      # loopback only, for deploy.sh health checks. Public traffic goes through Caddy.
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  caddy:
+    image: ${ECR_REGISTRY:?ECR_REGISTRY not set}/nanana-caddy:${IMAGE_TAG:?IMAGE_TAG not set}
+    container_name: nanana-caddy
+    restart: unless-stopped
+    mem_limit: 96m
+    pids_limit: 200
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      HOSTED_ZONE_ID: ${HOSTED_ZONE_ID:?HOSTED_ZONE_ID not set}
+      GOMEMLIMIT: 80MiB
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Certificates and ACME account: losing these only costs a re-issue, but
+      # Let's Encrypt rate-limits duplicates, so keep them across deploys.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  default:
+    name: nanana
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

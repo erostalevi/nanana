@@ -1,0 +1,20 @@
+[Unit]
+Description=nanana (docker compose stack)
+Requires=docker.service
+After=docker.service network-online.target local-fs.target
+Wants=network-online.target
+ConditionPathExists=/opt/nanana/docker-compose.yml
+ConditionPathExists=/opt/nanana/.env
+RequiresMountsFor=/var/lib/nanana/pgdata
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/nanana
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-import { isBlockedIp, resolveSafeTarget, UrlBlockedError } from './ssrf.js';
+import { isBlockedIp, pinnedLookup, resolveSafeTarget, UrlBlockedError } from './ssrf.js';
 
 describe('isBlockedIp', () => {
   it.each([
@@ -24,5 +24,17 @@ describe('resolveSafeTarget', () => {
   it('accepts public literals and the private escape hatch', async () => {
     expect((await resolveSafeTarget('https://8.8.8.8/x', false)).address).toBe('8.8.8.8');
     expect((await resolveSafeTarget('http://127.0.0.1:9/', true)).address).toBe('127.0.0.1');
+  });
+});
+
+describe('pinnedLookup', () => {
+  it('always answers with the vetted address in both callback shapes', () => {
+    const l = pinnedLookup('93.184.216.34', 4);
+    let single: unknown[] = [];
+    l('evil.example', {}, (...a) => (single = a));
+    expect(single).toEqual([null, '93.184.216.34', 4]);
+    let all: unknown[] = [];
+    l('evil.example', { all: true }, (...a) => (all = a));
+    expect(all).toEqual([null, [{ address: '93.184.216.34', family: 4 }]]);
   });
 });

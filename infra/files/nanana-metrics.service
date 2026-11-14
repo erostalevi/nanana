@@ -1,0 +1,7 @@
+[Unit]
+Description=Publish nanana custom CloudWatch metrics
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nanana-metrics

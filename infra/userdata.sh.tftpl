@@ -1,0 +1,81 @@
+#!/bin/bash
+# nanana host bootstrap (cloud-init user-data, runs once on first boot).
+# Rendered by OpenTofu; edit infra/userdata.sh.tftpl, not the instance.
+set -euxo pipefail
+exec > >(tee -a /var/log/nanana-bootstrap.log) 2>&1
+
+export AWS_DEFAULT_REGION="${region}"
+DATA_DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${data_volume_id_nodash}"
+MNT="/var/lib/nanana/pgdata"
+
+# ---- packages ---------------------------------------------------------------
+dnf install -y docker jq iptables-nft
+
+# ---- docker daemon: rotate logs, keep containers alive across daemon restarts ----
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'JSON'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "live-restore": true
+}
+JSON
+
+# ---- compose + buildx plugins (checksum verified) ----------------------------
+PLUGDIR=/usr/local/lib/docker/cli-plugins
+mkdir -p "$PLUGDIR"
+curl -fsSL -o "$PLUGDIR/docker-compose" \
+  "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64"
+echo "${compose_sha256}  $PLUGDIR/docker-compose" | sha256sum -c -
+curl -fsSL -o "$PLUGDIR/docker-buildx" \
+  "https://github.com/docker/buildx/releases/download/${buildx_version}/buildx-${buildx_version}.linux-amd64"
+echo "${buildx_sha256}  $PLUGDIR/docker-buildx" | sha256sum -c -
+chmod 0755 "$PLUGDIR/docker-compose" "$PLUGDIR/docker-buildx"
+
+# ---- swap (1 GB) ---------------------------------------------------------------
+if ! swapon --show=NAME --noheadings | grep -q '^/swapfile$'; then
+  dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+echo 'vm.swappiness=20' > /etc/sysctl.d/90-nanana.conf
+sysctl --system >/dev/null
+
+# ---- data volume: wait for attach, format once, mount ------------------------
+for i in $(seq 1 120); do
+  [ -e "$DATA_DEV" ] && break
+  sleep 5
+done
+[ -e "$DATA_DEV" ] || { echo "data volume $DATA_DEV never appeared" >&2; exit 1; }
+if ! blkid "$DATA_DEV" >/dev/null 2>&1; then
+  mkfs.xfs -L nanana-pgdata "$DATA_DEV"
+fi
+mkdir -p "$MNT"
+UUID="$(blkid -s UUID -o value "$DATA_DEV")"
+grep -q "$UUID" /etc/fstab || echo "UUID=$UUID $MNT xfs defaults,nofail,noatime 0 2" >> /etc/fstab
+mountpoint -q "$MNT" || mount "$MNT"
+# 999:999 is the postgres user inside the official postgres image.
+chown 999:999 "$MNT"
+chmod 700 "$MNT"
+
+# ---- host files (units, scripts) ---------------------------------------------
+%{ for path, f in files ~}
+install -D -m ${f.mode} /dev/null ${path}
+echo '${base64gzip(f.content)}' | base64 -d | gunzip > ${path}
+%{ endfor ~}
+
+mkdir -p /opt/nanana /etc/nanana
+chmod 755 /opt/nanana
+
+# ---- services -------------------------------------------------------------------
+systemctl daemon-reload
+systemctl enable --now docker
+systemctl enable --now amazon-ssm-agent
+systemctl enable nanana.service
+systemctl enable --now nanana-metrics.timer
+systemctl enable --now nanana-backup.timer
+
+touch /var/lib/nanana/.bootstrapped
+echo "nanana bootstrap complete"

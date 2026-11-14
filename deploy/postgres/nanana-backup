@@ -1,0 +1,13 @@
+#!/bin/sh
+# Take a WAL-G base backup. Run inside the postgres container as the postgres user:
+#   docker exec -u postgres nanana-postgres nanana-backup
+# Scheduled weekly by the nanana-backup.timer systemd unit on the host.
+#
+# Retention is NOT done here: the backup bucket denies deletes and expires objects
+# with an S3 lifecycle rule (see infra/backups.tf).
+set -eu
+: "${PGDATA:=/var/lib/postgresql/data/pgdata}"
+echo "$(date -u +%FT%TZ) starting base backup"
+wal-g backup-push "$PGDATA"
+echo "$(date -u +%FT%TZ) base backup done"
+wal-g backup-list

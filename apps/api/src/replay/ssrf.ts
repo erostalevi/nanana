@@ -42,3 +42,11 @@ export async function resolveSafeTarget(raw: string, allowPrivate: boolean): Pro
   const pick = addrs[0];
   return { url, address: pick.address, family: pick.family as 4 | 6 };
 }
+
+/** `lookup` option for http(s).request that always returns the already-vetted address (no re-resolution, no DNS rebinding). */
+export function pinnedLookup(address: string, family: 4 | 6) {
+  return (_hostname: string, options: unknown, cb: (...args: unknown[]) => void): void => {
+    if (typeof options === 'object' && options !== null && (options as { all?: boolean }).all) cb(null, [{ address, family }]);
+    else cb(null, address, family);
+  };
+}

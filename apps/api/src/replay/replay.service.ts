@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import http from 'node:http';
 import https from 'node:https';
+import type net from 'node:net';
 import { DataSource } from 'typeorm';
 import { v7 as uuidv7 } from 'uuid';
 import { ApiError, badRequest, notFound } from '../common/errors.js';
@@ -11,7 +12,7 @@ import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { replayDto, type CaptureRow } from '../requests/requests.service.js';
 import type { SubRow } from '../subdomains/subdomains.service.js';
 import { TunnelError, TunnelService } from '../tunnel/tunnel.service.js';
-import { resolveSafeTarget, UrlBlockedError } from './ssrf.js';
+import { pinnedLookup, resolveSafeTarget, UrlBlockedError } from './ssrf.js';
 
 const MAX_RESPONSE = 1024 * 1024;
 
@@ -125,7 +126,7 @@ export class ReplayService {
           timeout: 10_000,
           servername: url.hostname,
           // Connect to the already-vetted address: no second DNS lookup, so no rebinding.
-          lookup: (_h, _o, cb) => (_o && (_o as { all?: boolean }).all ? (cb as unknown as (e: null, a: unknown[]) => void)(null, [{ address, family }]) : cb(null, address, family)),
+          lookup: pinnedLookup(address, family) as unknown as net.LookupFunction,
         },
         (res) => {
           const chunks: Buffer[] = [];

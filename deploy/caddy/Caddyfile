@@ -1,0 +1,133 @@
+# nanana.lat edge. Certificates (all via DNS-01, Route 53, instance-role creds):
+#   nanana.lat + www.nanana.lat   (one certificate)
+#   *.tools.nanana.lat            (dashboards, wildcard)
+#   *.nanana.lat                  (api + webhook ingress, wildcard)
+#
+# Env: HOSTED_ZONE_ID, AWS_REGION (set in docker-compose.yml).
+
+{
+	# Wildcard certs need DNS-01; applying it globally covers every site below.
+	acme_dns route53 {
+		region {env.AWS_REGION}
+		hosted_zone_id {env.HOSTED_ZONE_ID}
+	}
+
+	# HTTP/3 needs UDP 443, which the security group does not open.
+	servers {
+		protocols h1 h2
+	}
+
+	# Caddy's own logs (cert issuance etc.) as JSON on stdout.
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ---- snippets ---------------------------------------------------------------------
+
+# Access log without bodies. Query strings may carry webhook secrets, so they are
+# stripped from the logged URI; auth headers/cookies are redacted by Caddy itself.
+(access_log) {
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp \?.* ?REDACTED
+			}
+		}
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Static SPA hosts get the strict browser-facing set.
+(spa_headers) {
+	header {
+		X-Frame-Options "DENY"
+		Cross-Origin-Opener-Policy "same-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://api.nanana.lat https://*.nanana.lat; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+	}
+}
+
+(spa) {
+	import security_headers
+	import spa_headers
+	import access_log
+	encode zstd gzip
+	root * /srv/www
+
+	@immutable path /assets/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	@index path / /index.html
+	header @index Cache-Control "no-cache"
+
+	try_files {path} /index.html
+	file_server
+}
+
+# ---- apex and www: landing, docs, account pages, CLI installer ------------------------
+
+nanana.lat, www.nanana.lat {
+	handle /install.sh {
+		import security_headers
+		import access_log
+		root * /srv/dl
+		rewrite * /install.sh
+		header Content-Type "text/plain; charset=utf-8"
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	handle {
+		import spa
+	}
+}
+
+# ---- dashboards: <slug>.tools.nanana.lat ---------------------------------------------
+
+*.tools.nanana.lat {
+	import spa
+}
+
+# ---- api.nanana.lat and webhook ingress <slug>.nanana.lat ------------------------------
+# Everything that is not apex/www/tools goes to the API. Nest resolves the host.
+
+*.nanana.lat {
+	import security_headers
+	import access_log
+
+	# Largest accepted body is 10 MB (accounts); leave headroom for framing.
+	request_body {
+		max_size 12MB
+	}
+
+	reverse_proxy api:3001 {
+		# SSE and WebSocket (/tunnel): never buffer, flush immediately.
+		flush_interval -1
+		# Streams (SSE, tunnel WebSocket) are long-lived: no response timeout.
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 90s
+			read_timeout 0
+			write_timeout 0
+			keepalive 120s
+		}
+		# X-Forwarded-For/Proto/Host are set by Caddy automatically. This makes the
+		# client address explicit as well.
+		header_up X-Real-IP {remote_host}
+		# Closing connections cleanly on config reload would drop live tunnels.
+		stream_close_delay 5m
+		stream_timeout 24h
+	}
+}

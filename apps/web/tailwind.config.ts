@@ -20,6 +20,8 @@ export default {
         ok: v('ok'),
         warn: v('warn'),
         bad: v('bad'),
+        put: v('put'),
+        patch: v('patch'),
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],

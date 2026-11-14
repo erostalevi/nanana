@@ -1,0 +1,8 @@
+[Unit]
+Description=Postgres base backup to S3 (WAL-G backup-push)
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec -u postgres nanana-postgres nanana-backup
+TimeoutStartSec=3h
