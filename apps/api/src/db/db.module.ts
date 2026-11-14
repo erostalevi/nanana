@@ -5,9 +5,10 @@ import { Subdomain } from '../subdomains/subdomain.entity.js';
 import { Init1731542400000 } from './migrations/1731542400000-init.js';
 import { Captures1731628800000 } from './migrations/1731628800000-captures.js';
 import { Accounts1731715200000 } from './migrations/1731715200000-accounts.js';
+import { Billing1731801600000 } from './migrations/1731801600000-billing.js';
 
 export const entities = [Subdomain];
-export const migrations = [Init1731542400000, Captures1731628800000, Accounts1731715200000];
+export const migrations = [Init1731542400000, Captures1731628800000, Accounts1731715200000, Billing1731801600000];
 
 @Global()
 @Module({

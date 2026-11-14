@@ -26,6 +26,11 @@ export interface AppConfig {
   replayAllowPrivate: boolean;
   /** Operator-only secret: lets tools/loadtest skip the per-IP creation limit and per-sub rate limit. */
   loadtestToken: string;
+  stripeSecretKey: string;
+  stripeWebhookSecret: string;
+  stripePriceMonthly: string;
+  stripePriceYearly: string;
+  stripeTax: boolean;
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -69,6 +74,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     runJobs: env.RUN_JOBS !== 'false',
     replayAllowPrivate: env.REPLAY_ALLOW_PRIVATE === 'true',
     loadtestToken: env.LOADTEST_TOKEN ?? '',
+    stripeSecretKey: env.STRIPE_SECRET_KEY ?? '',
+    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
+    stripePriceMonthly: env.STRIPE_PRICE_MONTHLY ?? '',
+    stripePriceYearly: env.STRIPE_PRICE_YEARLY ?? '',
+    stripeTax: env.STRIPE_TAX === 'true',
   };
 }
 

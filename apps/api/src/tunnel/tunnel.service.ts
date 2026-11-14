@@ -45,6 +45,7 @@ interface Conn {
   ws: WebSocket;
   subId: string;
   slug: string;
+  ownerId: string | null;
   lastSeen: number;
   pending: Map<string, Pending>;
   ping: NodeJS.Timeout;
@@ -71,12 +72,19 @@ export class TunnelService implements OnApplicationShutdown {
     return this.conns.has(subId);
   }
 
+  /** Simultaneous tunnels an account currently has (optionally ignoring one subdomain that is reconnecting). */
+  onlineForOwner(ownerId: string, exceptSubId?: string): number {
+    let n = 0;
+    for (const c of this.conns.values()) if (c.ownerId === ownerId && c.subId !== exceptSubId) n++;
+    return n;
+  }
+
   target(_subId: string): string | null {
     return null;
   }
 
   /** Registers a freshly upgraded socket; replaces any existing tunnel for the subdomain. */
-  register(ws: WebSocket, sub: { id: string; slug: string }, hello: Record<string, unknown>): void {
+  register(ws: WebSocket, sub: { id: string; slug: string; owner_id?: string | null }, hello: Record<string, unknown>): void {
     const old = this.conns.get(sub.id);
     if (old) this.drop(old, 'replaced');
 
@@ -84,6 +92,7 @@ export class TunnelService implements OnApplicationShutdown {
       ws,
       subId: sub.id,
       slug: sub.slug,
+      ownerId: sub.owner_id ?? null,
       lastSeen: Date.now(),
       pending: new Map(),
       ping: setInterval(() => {

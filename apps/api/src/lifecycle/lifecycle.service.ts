@@ -5,6 +5,7 @@ import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { COLD_AFTER_MS, DEAD_AFTER_MS } from '../config/plan-limits.js';
 import { EventsService } from '../events/events.service.js';
 import { AccountsService } from '../auth/accounts.service.js';
+import { BillingService } from '../billing/billing.service.js';
 import { SubdomainsService, type SubRow } from '../subdomains/subdomains.service.js';
 import { TunnelService } from '../tunnel/tunnel.service.js';
 
@@ -21,6 +22,7 @@ export class LifecycleService implements OnModuleInit, OnModuleDestroy {
     @Inject(EventsService) private readonly events: EventsService,
     @Inject(TunnelService) private readonly tunnels: TunnelService,
     @Inject(AccountsService) private readonly accounts: AccountsService,
+    @Inject(BillingService) private readonly billing: BillingService,
   ) {}
 
   onModuleInit(): void {
@@ -52,10 +54,11 @@ export class LifecycleService implements OnModuleInit, OnModuleDestroy {
 
     // 1. Hard-expired and idle-dead subdomains (tunnel-connected ones are not idle).
     const doomed = await q<SubRow[]>(this.ds, 
-      `SELECT * FROM subdomain
-       WHERE (hard_expires_at < now() AND (always_on_until IS NULL OR always_on_until < now()))
-          OR (last_activity_at < now() - ($1 || ' milliseconds')::interval
-              AND (always_on_until IS NULL OR always_on_until < now()))`,
+      `SELECT s.*, a.plan AS owner_plan FROM subdomain s LEFT JOIN account a ON a.id = s.owner_id
+       WHERE COALESCE(a.plan, 'free') NOT IN ('pro', 'pro_grace', 'lapsed')
+         AND ((s.hard_expires_at < now() AND (s.always_on_until IS NULL OR s.always_on_until < now()))
+          OR (s.last_activity_at < now() - ($1 || ' milliseconds')::interval
+              AND (s.always_on_until IS NULL OR s.always_on_until < now())))`,
       [String(deadMs)],
     );
     let dead = 0;
@@ -68,7 +71,9 @@ export class LifecycleService implements OnModuleInit, OnModuleDestroy {
 
     // 2. Active -> cold.
     const cooling = await q<SubRow[]>(this.ds, 
-      `SELECT * FROM subdomain WHERE state = 'active' AND last_activity_at < now() - ($1 || ' milliseconds')::interval`,
+      `SELECT s.* FROM subdomain s LEFT JOIN account a ON a.id = s.owner_id
+       WHERE s.state = 'active' AND s.last_activity_at < now() - ($1 || ' milliseconds')::interval
+         AND COALESCE(a.plan, 'free') NOT IN ('pro', 'pro_grace', 'lapsed')`,
       [String(coldMs)],
     );
     let cold = 0;
@@ -81,13 +86,15 @@ export class LifecycleService implements OnModuleInit, OnModuleDestroy {
 
     // 3. Retention by age (1 h) and housekeeping.
     const old = await q<{ id: string; slug: string }[]>(this.ds, 
-      `DELETE FROM captured_request c USING subdomain s
-       WHERE c.subdomain_id = s.id AND c.received_at < now() - interval '1 hour'
+      `DELETE FROM captured_request c USING subdomain s LEFT JOIN account a ON a.id = s.owner_id
+       WHERE c.subdomain_id = s.id
+         AND c.received_at < now() - CASE WHEN COALESCE(a.plan, 'free') IN ('pro', 'pro_grace', 'lapsed') THEN interval '24 hours' ELSE interval '1 hour' END
        RETURNING c.id, s.slug`,
     );
     for (const r of old) this.events.emit(r.slug, 'request.deleted', { id: r.id });
     await q(this.ds, 'DELETE FROM slug_tombstone WHERE until < now()');
     await this.accounts.cleanup();
+    await this.billing.housekeeping();
     return { cold, dead, evicted: old.length };
   }
 }

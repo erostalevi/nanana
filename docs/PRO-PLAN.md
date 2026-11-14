@@ -1,6 +1,14 @@
 # Pro plan (decisions, ready to build)
 
-Status: designed, not built. Billing through **Stripe** (US entity via Atlas). Start in Stripe **test mode**; nothing depends on the Atlas account existing yet.
+Status: **built** (API, web UI, tests). Billing is dormant in production until Stripe keys are stored: until then `GET /billing/plans` reports `enabled: false` and the web app shows Pro as "Coming soon". Billing through **Stripe** (US entity via Atlas); start in Stripe **test mode**.
+
+## Turning it on
+
+1. Create a Stripe account (test mode is enough to start) and copy the secret key.
+2. `node tools/stripe/setup.mjs --key sk_test_xxx --apply` creates the product, the $8/month and $80/year prices, the webhook endpoint (`https://api.nanana.lat/billing/webhook`) and the customer portal, and stores `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, `STRIPE_TAX` in SSM under `/nanana/prod/`.
+3. Redeploy (push to `main` or run the Deploy workflow). Billing turns on automatically.
+4. Going live later: run the same command with `--key sk_live_xxx --apply` (and `--tax` once Stripe Tax is set up).
+5. Comp an account without Stripe: `docker compose exec api node dist/admin-cli.js set-plan <email> pro` (or `free`).
 
 ## Plans
 

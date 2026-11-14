@@ -8,6 +8,8 @@ import { q } from '../db/query.js';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { limitsFor } from '../config/plan-limits.js';
 import { TunnelService } from '../tunnel/tunnel.service.js';
+import { BillingService } from '../billing/billing.service.js';
+import { limitsDto } from './limits.js';
 import { AccessService } from './access.service.js';
 import { AccountsService, accountDto } from './accounts.service.js';
 import { OAuthService, type OAuthProvider } from './oauth.service.js';
@@ -26,6 +28,7 @@ export class AuthController {
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(TunnelService) private readonly tunnels: TunnelService,
+    @Inject(BillingService) private readonly billing: BillingService,
   ) {}
 
   private providers() {
@@ -96,17 +99,10 @@ export class AuthController {
   @Get('me')
   async me(@Req() req: Request) {
     const p = await this.access.requireAccount(req);
-    const limits = limitsFor(p.plan);
     return {
       account: { id: p.accountId, email: p.email, displayName: p.displayName, plan: p.plan },
-      limits: {
-        maxActiveSubdomains: limits.maxActiveSubdomains,
-        maxCustomNames: limits.maxCustomNames,
-        maxBodyBytes: limits.maxBodyBytes,
-        ratePerMinute: limits.ratePerMinute,
-        retentionMaxRequests: limits.retentionMaxRequests,
-        retentionMaxAgeMs: limits.retentionMaxAgeMs,
-      },
+      limits: limitsDto(limitsFor(p.plan)),
+      billing: await this.billing.status(p.accountId),
       providers: this.providers(),
     };
   }

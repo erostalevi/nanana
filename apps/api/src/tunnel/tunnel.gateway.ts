@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import { AccessService } from '../auth/access.service.js';
 import { sha256 } from '../common/crypto.js';
 import { APP_CONFIG, publicUrls, type AppConfig } from '../config/app-config.js';
+import { limitsFor } from '../config/plan-limits.js';
 import { resolveHost } from '../hosts/host-resolver.js';
 import { SubdomainsService } from '../subdomains/subdomains.service.js';
 import { TunnelService } from './tunnel.service.js';
@@ -64,6 +65,12 @@ export class TunnelGateway {
     if (!sub) return reject(socket, 404, 'not_found', 'Subdomain not found');
     if (p.kind === 'sub' ? p.subId !== sub.id : sub.owner_id !== p.accountId)
       return reject(socket, 403, 'forbidden', 'This token does not grant access to that subdomain');
+
+    if (sub.owner_id) {
+      const max = limitsFor(sub.owner_plan ?? 'free').tunnelsPerAccount;
+      if (this.tunnels.onlineForOwner(sub.owner_id, sub.id) >= max)
+        return reject(socket, 403, 'tunnel_limit', `Your plan allows ${max} simultaneous tunnels. Close one or upgrade to Pro.`);
+    }
 
     this.wss.handleUpgrade(req, socket, head, (ws) => {
       const urls = publicUrls(this.cfg, sub.slug);

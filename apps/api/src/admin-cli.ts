@@ -17,6 +17,7 @@ const usage = `usage: admin-cli <command>
   disable-sub <slug>       delete a subdomain now (custom names get the 7-day tombstone)
   disable-account <email>  disable an account, delete its sessions/tokens and owned subdomains
   enable-account <email>   re-enable a disabled account
+  set-plan <email> <free|pro>   comp an account to Pro (no Stripe subscription) or move it back to free
   find <slug|email>        show what we know about a subdomain or account`;
 
 if (!cmd || cmd === 'help') {
@@ -75,6 +76,22 @@ try {
       const a = await db.query('UPDATE account SET disabled_at = NULL WHERE lower(email) = lower($1) RETURNING id', [arg]);
       if (!a.rows[0]) throw new Error(`no such account: ${arg}`);
       console.log(`enabled ${arg}`);
+      break;
+    }
+    case 'set-plan': {
+      const plan = process.argv[4];
+      if (!arg || (plan !== 'free' && plan !== 'pro')) throw new Error('usage: set-plan <email> <free|pro>');
+      await db.query('BEGIN');
+      const a = await db.query('UPDATE account SET plan = $2 WHERE lower(email) = lower($1) RETURNING id', [arg, plan]);
+      if (!a.rows[0]) throw new Error(`no such account: ${arg}`);
+      const id = a.rows[0].id;
+      if (plan === 'free') {
+        await db.query(`UPDATE slug_tombstone SET until = now() + interval '7 days' WHERE owner_id = $1 AND until = 'infinity'`, [id]);
+        await db.query(`UPDATE subdomain SET state = 'active', last_activity_at = now(), hard_expires_at = now() + interval '7 days', renewed_at = NULL WHERE owner_id = $1`, [id]);
+        await db.query(`UPDATE subdomain SET hard_expires_at = now() + interval '3 days' WHERE id IN (SELECT id FROM subdomain WHERE owner_id = $1 ORDER BY created_at DESC OFFSET 3)`, [id]);
+      }
+      await db.query('COMMIT');
+      console.log(`${arg} is now on the ${plan} plan`);
       break;
     }
     case 'find': {

@@ -3,7 +3,7 @@ import { q } from '../db/query.js';
 import { DataSource } from 'typeorm';
 import { v7 as uuidv7 } from 'uuid';
 import { APP_CONFIG, publicUrls, type AppConfig } from '../config/app-config.js';
-import { limitsFor } from '../config/plan-limits.js';
+import { isLapsed, isProLike, limitsFor } from '../config/plan-limits.js';
 import { ANONYMOUS_CREATES_PER_IP_PER_DAY } from '../config/plan-limits.js';
 import { ApiError, badRequest } from '../common/errors.js';
 import { encryptSecret, hashIp, newToken, randomSlug, sha256 } from '../common/crypto.js';
@@ -31,6 +31,8 @@ export interface SubRow {
   created_at: Date;
   hard_expires_at: Date;
   renewed_at: Date | null;
+  /** Plan of the owning account (set by the joined lookups; undefined on RETURNING rows). */
+  owner_plan?: string | null;
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -47,20 +49,28 @@ export class SubdomainsService {
   ) {}
 
   async getBySlug(slug: string): Promise<SubRow | null> {
-    const rows = await q<SubRow[]>(this.ds, 'SELECT * FROM subdomain WHERE slug = $1', [slug]);
+    const rows = await q<SubRow[]>(this.ds, `SELECT s.*, a.plan AS owner_plan FROM subdomain s LEFT JOIN account a ON a.id = s.owner_id WHERE s.slug = $1`, [slug]);
     return rows[0] ?? null;
   }
 
   async getByTokenHash(hash: string): Promise<SubRow | null> {
-    const rows = await q<SubRow[]>(this.ds, 'SELECT * FROM subdomain WHERE token_hash = $1', [hash]);
+    const rows = await q<SubRow[]>(this.ds, `SELECT s.*, a.plan AS owner_plan FROM subdomain s LEFT JOIN account a ON a.id = s.owner_id WHERE s.token_hash = $1`, [hash]);
     return rows[0] ?? null;
   }
 
   async listByOwner(ownerId: string): Promise<SubRow[]> {
-    return q<SubRow[]>(this.ds, 'SELECT * FROM subdomain WHERE owner_id = $1 ORDER BY created_at DESC', [ownerId]);
+    return q<SubRow[]>(this.ds, `SELECT s.*, a.plan AS owner_plan FROM subdomain s LEFT JOIN account a ON a.id = s.owner_id WHERE s.owner_id = $1 ORDER BY s.created_at DESC`, [ownerId]);
+  }
+
+  async ownerPlan(row: SubRow): Promise<string | null> {
+    if (!row.owner_id) return null;
+    if (row.owner_plan !== undefined) return row.owner_plan ?? 'free';
+    const r = await q<{ plan: string }[]>(this.ds, 'SELECT plan FROM account WHERE id = $1', [row.owner_id]);
+    return r[0]?.plan ?? 'free';
   }
 
   async dto(row: SubRow) {
+    const plan = await this.ownerPlan(row);
     const mock = (
       await q<{ status: number; remaining: number }[]>(this.ds, 
         'SELECT status, remaining FROM mock_rule WHERE subdomain_id = $1',
@@ -83,6 +93,9 @@ export class SubdomainsService {
         row.hmac_secret_enc || row.hmac_header
           ? { header: row.hmac_header ?? 'x-signature', algo: row.hmac_algo, configured: !!row.hmac_secret_enc }
           : null,
+      alwaysOn: isProLike(plan),
+      readOnly: isLapsed(plan),
+      reserved: row.is_custom && (isProLike(plan) || isLapsed(plan)),
       tunnelOnline: this.tunnels.isOnline(row.id),
       mock: mock ? { status: mock.status, remaining: mock.remaining } : null,
     };
@@ -96,7 +109,7 @@ export class SubdomainsService {
     if (!input.ownerId) {
       if (name) throw new ApiError(403, 'forbidden', 'Custom names require an account');
       const [{ n }] = await q<{ n: string }[]>(this.ds, 
-        `SELECT count(*) AS n FROM subdomain WHERE created_ip_hash = $1 AND created_at > now() - interval '1 day'`,
+        `SELECT count(*) AS n FROM subdomain WHERE created_ip_hash = $1 AND owner_id IS NULL AND created_at > now() - interval '1 day'`,
         [ipHash],
       );
       if (!input.skipIpLimit && Number(n) >= ANONYMOUS_CREATES_PER_IP_PER_DAY)
@@ -218,12 +231,15 @@ export class SubdomainsService {
   }
 
   async remove(row: SubRow, reason: 'deleted' | 'expired' = 'deleted'): Promise<void> {
+    // Pro owners keep their custom names reserved forever (released when the plan lapses).
+    const reserveForever = row.is_custom && isProLike(await this.ownerPlan(row));
     await this.ds.transaction(async (m) => {
       if (row.is_custom)
         await m.query(
-          `INSERT INTO slug_tombstone (slug, owner_id, until) VALUES ($1,$2, now() + interval '7 days')
+          `INSERT INTO slug_tombstone (slug, owner_id, until)
+           VALUES ($1, $2, CASE WHEN $3::boolean THEN 'infinity'::timestamptz ELSE now() + interval '7 days' END)
            ON CONFLICT (slug) DO UPDATE SET owner_id = EXCLUDED.owner_id, until = EXCLUDED.until`,
-          [row.slug, row.owner_id],
+          [row.slug, row.owner_id, reserveForever],
         );
       await m.query('DELETE FROM subdomain WHERE id = $1', [row.id]);
     });

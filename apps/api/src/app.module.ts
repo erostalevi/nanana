@@ -4,6 +4,9 @@ import { AccountsService } from './auth/accounts.service.js';
 import { AuthController } from './auth/auth.controller.js';
 import { MailService } from './auth/mail.service.js';
 import { OAuthService } from './auth/oauth.service.js';
+import { BillingController } from './billing/billing.controller.js';
+import { BillingService } from './billing/billing.service.js';
+import { StripeGateway } from './billing/stripe.gateway.js';
 import { DbModule } from './db/db.module.js';
 import { EventsService } from './events/events.service.js';
 import { HealthController } from './health/health.controller.js';
@@ -20,7 +23,7 @@ import { TunnelService } from './tunnel/tunnel.service.js';
 
 @Module({
   imports: [DbModule],
-  controllers: [HealthController, SubdomainsController, RequestsController, AuthController],
+  controllers: [HealthController, SubdomainsController, RequestsController, AuthController, BillingController],
   providers: [
     EventsService,
     TunnelService,
@@ -30,6 +33,8 @@ import { TunnelService } from './tunnel/tunnel.service.js';
     MailService,
     AccountsService,
     OAuthService,
+    StripeGateway,
+    BillingService,
     { provide: ACCOUNT_RESOLVER, useExisting: AccountsService },
     MocksService,
     ReplayService,

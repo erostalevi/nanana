@@ -35,6 +35,9 @@ export async function createApp(): Promise<NestExpressApplication> {
     next();
   });
 
+  // Stripe webhooks need the exact raw bytes for signature verification.
+  app.use('/billing/webhook', express.raw({ type: '*/*', limit: '1mb' }));
+
   // 3. JSON bodies for the API only.
   const json = express.json({ limit: '1mb' });
   app.use((req: Request, res: Response, next: NextFunction) =>

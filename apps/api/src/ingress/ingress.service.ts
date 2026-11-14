@@ -4,7 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { DataSource } from 'typeorm';
 import { v7 as uuidv7 } from 'uuid';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
-import { limitsFor } from '../config/plan-limits.js';
+import { isLapsed, limitsFor, type PlanLimits } from '../config/plan-limits.js';
 import { isLoadtest } from '../common/loadtest.js';
 import { RateLimiter } from '../common/rate-limiter.js';
 import { PayloadTooLarge, rawHeaders, readBody, stripHopByHop, type HeaderMap } from '../common/http.js';
@@ -17,8 +17,6 @@ import { TunnelService, type ForwardResponse } from '../tunnel/tunnel.service.js
 
 const MAX_STORED_RESPONSE = 1024 * 1024;
 const MAX_RELAY_RESPONSE = 10 * 1024 * 1024;
-const SUB_BYTE_BUDGET = 50 * 1024 * 1024;
-const MAX_RETAINED = 100;
 
 const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
@@ -69,13 +67,15 @@ export class IngressService {
       return this.send(res, 404, '{"error":"not_found","message":"This subdomain does not exist or has expired."}');
     }
 
-    const limits = limitsFor(sub.owner_id ? 'free' : null);
+    const plan = sub.owner_id ? (sub.owner_plan ?? 'free') : null;
+    if (isLapsed(plan)) return this.send(res, 402, '{"error":"endpoint_read_only","message":"The owner of this endpoint has no active plan. It is read-only and not capturing new requests."}');
+    const limits = limitsFor(plan);
     const wait = isLoadtest(this.cfg, req) ? 0 : this.limiter.take(`sub:${sub.id}`, limits.ratePerMinute);
     if (wait > 0) return this.send(res, 429, '{"error":"rate_limited"}', { 'retry-after': String(wait) });
 
     let body: Buffer;
     try {
-      body = await readBody(req, Math.min(limits.maxBodyBytes, SUB_BYTE_BUDGET));
+      body = await readBody(req, Math.min(limits.maxBodyBytes, limits.retentionMaxBytes));
     } catch (e) {
       if (e instanceof PayloadTooLarge) return this.send(res, 413, '{"error":"payload_too_large"}', { connection: 'close' });
       throw e;
@@ -165,7 +165,7 @@ export class IngressService {
     );
     const updated = await this.requests.summaryById(sub, id);
     if (updated) this.events.emit(slug, 'request.updated', updated);
-    await this.enforceRetention(sub);
+    await this.enforceRetention(sub, limits);
   }
 
   private forwardHeaders(h: HeaderMap, ip: string, host: string): HeaderMap {
@@ -178,8 +178,8 @@ export class IngressService {
     return out;
   }
 
-  /** Newest 100 requests and a 50 MB byte budget per subdomain. */
-  async enforceRetention(sub: Pick<SubRow, 'id' | 'slug'>): Promise<void> {
+  /** Newest N requests and a byte budget per subdomain, both from the owner's plan. */
+  async enforceRetention(sub: Pick<SubRow, 'id' | 'slug'>, limits: PlanLimits = limitsFor(null)): Promise<void> {
     const rows = await q<{ id: string }[]>(this.ds, 
       `WITH ranked AS (
          SELECT id,
@@ -189,7 +189,7 @@ export class IngressService {
        )
        DELETE FROM captured_request WHERE id IN (SELECT id FROM ranked WHERE rn > $2 OR (rn > 1 AND running > $3))
        RETURNING id`,
-      [sub.id, MAX_RETAINED, SUB_BYTE_BUDGET],
+      [sub.id, limits.retentionMaxRequests, limits.retentionMaxBytes],
     );
     for (const r of rows) this.events.emit(sub.slug, 'request.deleted', { id: r.id });
   }
