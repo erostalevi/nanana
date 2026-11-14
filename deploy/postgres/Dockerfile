@@ -18,6 +18,11 @@ RUN set -eux; \
     chmod 0755 /wal-g
 
 FROM postgres:16-bookworm
+# The official image ships no CA bundle; WAL-G needs it to verify S3's TLS certificate
+# (without it every request fails certificate verification and WAL-G retries forever).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=walg /wal-g /usr/local/bin/wal-g
 COPY nanana.conf /etc/postgresql/nanana.conf
 COPY nanana-backup /usr/local/bin/nanana-backup
