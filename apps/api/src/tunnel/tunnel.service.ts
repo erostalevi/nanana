@@ -89,6 +89,12 @@ export class TunnelService implements OnApplicationShutdown {
       ping: setInterval(() => {
         if (Date.now() - conn.lastSeen > SILENCE_MS) return this.drop(conn, undefined, true);
         this.sendJson(conn, { t: 'ping' });
+        // The subdomain may have been removed out-of-band (admin CLI): drop orphaned tunnels.
+        void q<unknown[]>(this.ds, 'SELECT 1 FROM subdomain WHERE id = $1', [conn.subId])
+          .then((r) => {
+            if (r.length === 0) this.drop(conn, 'deleted');
+          })
+          .catch(() => undefined);
       }, PING_MS),
     };
     conn.ping.unref();
