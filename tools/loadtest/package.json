@@ -1,0 +1,15 @@
+{
+  "name": "loadtest",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Traffic simulator + live resource monitor + verdict for the nanana production box, and a capacity estimator",
+  "scripts": {
+    "loadtest": "node loadtest.mjs",
+    "estimate": "node estimate.mjs"
+  },
+  "dependencies": {
+    "undici": "^7.0.0",
+    "ws": "^8.18.0"
+  }
+}
