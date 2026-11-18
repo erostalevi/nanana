@@ -40,6 +40,8 @@ const DAY = 24 * 60 * 60 * 1000;
 @Injectable()
 export class SubdomainsService {
   private touched = new Map<string, number>();
+  /** Short-lived copy of the endpoint row for the webhook hot path (see getBySlugCached). */
+  private readonly slugCache = new Map<string, { row: SubRow; exp: number }>();
 
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
@@ -51,6 +53,30 @@ export class SubdomainsService {
   async getBySlug(slug: string): Promise<SubRow | null> {
     const rows = await q<SubRow[]>(this.ds, `SELECT s.*, a.plan AS owner_plan FROM subdomain s LEFT JOIN account a ON a.id = s.owner_id WHERE s.slug = $1`, [slug]);
     return rows[0] ?? null;
+  }
+
+  /**
+   * Webhook ingestion looks the endpoint up on every request. A 2 second cache removes that query from the hot path; every
+   * mutation below invalidates its slug, and plan/lifecycle changes call invalidateAll(), so staleness is bounded by the TTL
+   * only for writes made by another process (the admin CLI). Misses are never cached, so a just-created endpoint works at once.
+   */
+  async getBySlugCached(slug: string): Promise<SubRow | null> {
+    const hit = this.slugCache.get(slug);
+    if (hit && hit.exp > Date.now()) return hit.row;
+    const row = await this.getBySlug(slug);
+    if (row) {
+      if (this.slugCache.size > 20_000) this.slugCache.clear();
+      this.slugCache.set(slug, { row, exp: Date.now() + 2000 });
+    } else this.slugCache.delete(slug);
+    return row;
+  }
+
+  invalidate(slug: string): void {
+    this.slugCache.delete(slug);
+  }
+
+  invalidateAll(): void {
+    this.slugCache.clear();
   }
 
   async getByTokenHash(hash: string): Promise<SubRow | null> {
@@ -193,6 +219,7 @@ export class SubdomainsService {
     row: SubRow,
     body: { offlineStatus?: unknown; offlineBody?: unknown; hmacSecret?: unknown; hmacHeader?: unknown; hmacAlgo?: unknown },
   ): Promise<SubRow> {
+    this.slugCache.delete(row.slug);
     const sets: string[] = [];
     const vals: unknown[] = [];
     const add = (col: string, v: unknown) => {
@@ -243,6 +270,7 @@ export class SubdomainsService {
         );
       await m.query('DELETE FROM subdomain WHERE id = $1', [row.id]);
     });
+    this.slugCache.delete(row.slug);
     this.events.emit(row.slug, 'subdomain.deleted', {});
     this.tunnels.close(row.id, reason);
   }
@@ -255,6 +283,7 @@ export class SubdomainsService {
     const [{ n }] = await q<{ n: string }[]>(this.ds, 'SELECT count(*) AS n FROM subdomain WHERE owner_id = $1', [accountId]);
     if (Number(n) >= limits.maxActiveSubdomains) throw new ApiError(403, 'limit_reached', `Your plan allows ${limits.maxActiveSubdomains} active subdomains`);
     const rows = await q<SubRow[]>(this.ds, 'UPDATE subdomain SET owner_id = $1 WHERE id = $2 RETURNING *', [accountId, row.id]);
+    this.slugCache.delete(slug);
     return rows[0];
   }
 
@@ -264,6 +293,7 @@ export class SubdomainsService {
       `UPDATE subdomain SET hard_expires_at = hard_expires_at + $2::interval, renewed_at = now() WHERE id = $1 RETURNING *`,
       [row.id, `${7 * 24} hours`],
     );
+    this.slugCache.delete(row.slug);
     this.events.emit(row.slug, 'subdomain.state', { state: rows[0].state, hardExpiresAt: rows[0].hard_expires_at.toISOString() });
     return rows[0];
   }

@@ -26,6 +26,12 @@ export interface AppConfig {
   replayAllowPrivate: boolean;
   /** Operator-only secret: lets tools/loadtest skip the per-IP creation limit and per-sub rate limit. */
   loadtestToken: string;
+  /** Per-endpoint retention cleanup runs at most this often (ms); 0 = on every request (tests). */
+  retentionIntervalMs: number;
+  /** Load shedding for webhook ingestion (see common/load.service.ts). */
+  shedEnabled: boolean;
+  /** An ingress request that is not admitted to the database within this budget gets a 503. */
+  requestBudgetMs: number;
   /** Polar organization access token, webhook signing secret, and the two subscription product ids. */
   polarAccessToken: string;
   polarWebhookSecret: string;
@@ -76,6 +82,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     runJobs: env.RUN_JOBS !== 'false',
     replayAllowPrivate: env.REPLAY_ALLOW_PRIVATE === 'true',
     loadtestToken: env.LOADTEST_TOKEN ?? '',
+    retentionIntervalMs: Number(env.RETENTION_INTERVAL_MS ?? 60_000),
+    shedEnabled: env.SHED_ENABLED !== 'false',
+    requestBudgetMs: Number(env.REQUEST_BUDGET_MS ?? 1000),
     polarAccessToken: env.POLAR_ACCESS_TOKEN ?? '',
     polarWebhookSecret: env.POLAR_WEBHOOK_SECRET ?? '',
     polarProductMonthly: env.POLAR_PRODUCT_MONTHLY ?? '',

@@ -6,10 +6,11 @@ import { Init1731542400000 } from './migrations/1731542400000-init.js';
 import { Captures1731628800000 } from './migrations/1731628800000-captures.js';
 import { Accounts1731715200000 } from './migrations/1731715200000-accounts.js';
 import { Billing1731801600000 } from './migrations/1731801600000-billing.js';
+import { Performance1731974400000 } from './migrations/1731974400000-performance.js';
 import { BillingProvider1731888000000 } from './migrations/1731888000000-billing-provider.js';
 
 export const entities = [Subdomain];
-export const migrations = [Init1731542400000, Captures1731628800000, Accounts1731715200000, Billing1731801600000, BillingProvider1731888000000];
+export const migrations = [Init1731542400000, Captures1731628800000, Accounts1731715200000, Billing1731801600000, BillingProvider1731888000000, Performance1731974400000];
 
 @Global()
 @Module({
@@ -20,6 +21,12 @@ export const migrations = [Init1731542400000, Captures1731628800000, Accounts173
       useFactory: () => ({
         type: 'postgres' as const,
         url: loadConfig().databaseUrl,
+        poolSize: 20, // Postgres allows 40; the default of 10 made requests queue for a connection under load
+        extra: {
+          // Fail fast instead of queueing: an overloaded ingress request becomes a 503 rather than a multi-second wait.
+          connectionTimeoutMillis: 1500,
+          idleTimeoutMillis: 30_000,
+        },
         entities,
         migrations,
         migrationsRun: true,
