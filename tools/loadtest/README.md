@@ -21,6 +21,8 @@ node tools/loadtest/loadtest.mjs --rps 150 --duration 90 --subs 30 --tunnel-shar
 
 **Tunnel share.** Every profile sends a percentage of its requests to endpoints that have a fake CLI tunnel connected (the fake CLI answers instantly), so the tunnel path (WebSocket framing, in-flight tracking) is part of every test. Set it with `--tunnel-share <0-100>`; custom runs without the flag use the default of 30% (`DEFAULT_TUNNEL_SHARE` in the script, the same figure the estimator assumes, there as the fraction 0.3). The number of tunnelled endpoints is derived from the share (at least one, at most 40, and at least one plain endpoint unless the share is 100%); `--tunnels N` overrides that count. The result reports the share actually sent and how many responses really came through a tunnel.
 
+`--ramp-seconds N` changes how long a fixed profile takes to climb from 20% to 100% of its rate (default: the first 20% of the run). A soak test at a known-good rate looks like `--rps 505 --duration 300 --ramp-seconds 15 --subs 40 --tunnel-share 30`.
+
 Hard caps for the fixed profiles: 600 rps, 300 s, 100 subdomains, 40 tunnels, 512 KB bodies.
 
 ### Probe mode

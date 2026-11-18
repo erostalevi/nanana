@@ -200,7 +200,8 @@ async function main() {
     const startAt = Date.now();
     let running = true;
     const fixedEndAt = isProbe ? Infinity : startAt + prof.duration * 1000;
-    const rampMs = prof.duration * 1000 * 0.2;
+    // fixed profiles ramp 20% -> 100% of the target; default is the first 20% of the run, --ramp-seconds shortens it (e.g. for soak tests)
+    const rampMs = (typeof args.rampSeconds === 'number' ? Math.max(1, args.rampSeconds) : prof.duration * 0.2) * 1000;
     const samples = [];
     let prevSnap = base;
     let monitorBusy = false;
@@ -321,7 +322,13 @@ async function main() {
           const ev = evaluateStep(step);
           failPct = ev.failPct;
           if (age >= 6000 && ev.n >= 60 && ev.failPct >= P.failAt) { step.broke = true; break; }
-          if (step.sent > 50 && step.skipped > 0.05 * (step.sent + step.skipped)) { step.generatorLimited = true; break; }
+          if (step.sent > 50 && step.skipped > 0.05 * (step.sent + step.skipped)) {
+            // Requests are skipped when 4000 are in flight. That is either this machine failing to keep up (server still
+            // answering fast and cleanly) or the server hanging (requests pile up). Only the first is a generator limit.
+            if (ev.failPct >= 5 || age >= 6000 && summarize(step.lat.slice(-200)).p95 > 1000) { step.broke = true; step.pileUp = true; }
+            else step.generatorLimited = true;
+            break;
+          }
         }
         step.endedAt = Date.now();
         const ev = evaluateStep(step);
@@ -482,7 +489,7 @@ function printVerdict(r) {
   if (r.resources.stealAvg != null && r.resources.stealAvg > 10) warns.push(`CPU steal ${r.resources.stealAvg.toFixed(0)}% (credits exhausted: the instance is being throttled)`);
   if (r.credits.start != null && r.credits.end != null && r.credits.start > 0 && r.credits.end < r.credits.start * 0.7) warns.push(`CPU credits fell from ${r.credits.start.toFixed(0)} to ${r.credits.end.toFixed(0)} (30%+ burn)`);
   if (r.latencyDriftP95.firstQuarter > 0 && r.latencyDriftP95.lastQuarter > 2 * r.latencyDriftP95.firstQuarter && r.latencyDriftP95.lastQuarter > 200) warns.push(`latency degraded over time (p95 ${fmt.ms(r.latencyDriftP95.firstQuarter)} -> ${fmt.ms(r.latencyDriftP95.lastQuarter)})`);
-  if (t.skippedClientSide > 0) warns.push(`the load generator itself saturated and skipped ${t.skippedClientSide} requests (results understate the target rate)`);
+  if (t.skippedClientSide > 0) warns.push(`${t.skippedClientSide} requests were skipped because 4000 were already in flight: either the load generator could not keep up, or (if the error rate and latency above are bad) the server stopped answering and requests piled up`);
   const logs = r.logErrors ? Object.entries(r.logErrors).filter(([, n]) => n > 20) : [];
   for (const [c, n] of logs) warns.push(`${n} error lines in ${c} logs during the test`);
 
