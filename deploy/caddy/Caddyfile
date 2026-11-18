@@ -136,6 +136,9 @@ nanana.lat, www.nanana.lat {
 			read_timeout 0
 			write_timeout 0
 			keepalive 120s
+			# Reuse upstream connections instead of dialing (and resolving `api`) per request at high rates.
+			keepalive_idle_conns 512
+			keepalive_idle_conns_per_host 256
 		}
 		# X-Forwarded-For/Proto/Host are set by Caddy automatically. This makes the
 		# client address explicit as well.

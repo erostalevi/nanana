@@ -18,6 +18,26 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 
 cd "$DIR"
 
+# Host networking limits. Every new TCP connection (webhook senders open one per request) and every DNS lookup between
+# containers takes a connection-tracking entry for 30-120 s; the default table on a 1 GB box holds only 7680, and a full
+# table silently drops packets ("nf_conntrack: table full, dropping packet"), which looked like a CPU ceiling at ~100 req/s.
+# Idempotent; failures are logged, never fatal.
+tune_host() {
+  modprobe nf_conntrack 2>/dev/null || true
+  printf 'nf_conntrack\n' >/etc/modules-load.d/nanana.conf 2>/dev/null || true
+  cat >/etc/sysctl.d/99-nanana.conf <<'SYSCTL' || true
+net.netfilter.nf_conntrack_max = 131072
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+net.netfilter.nf_conntrack_tcp_timeout_close_wait = 30
+net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
+net.ipv4.tcp_tw_reuse = 1
+SYSCTL
+  sysctl -q -p /etc/sysctl.d/99-nanana.conf || echo "warning: could not apply sysctl settings"
+  echo 32768 >/sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || true
+  echo "conntrack: max=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null) count=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)"
+}
+tune_host
+
 compose() { docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" "$@"; }
 
 env_get() { # env_get KEY  (value from .env, empty if unset)
