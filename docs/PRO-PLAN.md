@@ -1,6 +1,6 @@
 # Pro plan (decisions, ready to build)
 
-Status: **built** (API, web UI, tests). Billing is dormant in production until Polar credentials are stored: until then `GET /billing/plans` reports `enabled: false` and the web app shows Pro as "Coming soon". Billing runs on **[Polar](https://polar.sh)** as merchant of record (no upfront cost, a percentage per sale; Polar collects and remits sales tax and VAT). Stripe was dropped because it does not onboard Chilean businesses directly.
+Status: **live in production** (Polar credentials stored 2026-11-18; `GET /billing/plans` reports `enabled: true`). Without credentials the API reports `enabled: false` and the web app shows Pro as "Coming soon". Billing runs on **[Polar](https://polar.sh)** as merchant of record (no upfront cost, a percentage per sale; Polar collects and remits sales tax and VAT). Stripe was dropped because it does not onboard Chilean businesses directly.
 
 ## Turning it on
 
