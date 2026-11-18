@@ -108,7 +108,7 @@ export type MeResponse = {
 export type Providers = { github: boolean; google: boolean; magic: true };
 export type CliToken = { id: string; name: string; createdAt: string; lastUsedAt: string | null };
 
-export type AdminMinute = { minute: number; captured: number; rejected: number; tunneled: number; avgLatencyMs: number; maxLatencyMs: number };
+export type AdminMinute = { minute: number; captured: number; rejected: number; shed: number; tunneled: number; avgLatencyMs: number; maxLatencyMs: number };
 export type AdminStats = {
   accounts: number;
   subdomains: { total: number; active: number; cold: number; anonymous: number; custom: number };
@@ -125,6 +125,7 @@ export type AdminStats = {
     lastFiveMinutes: number;
     lastHour: number;
     rejectedLastHour: number;
+    shedLastHour: number;
     tunneledLastHour: number;
     avgLatencyMs: number;
     topEndpoints: { slug: string; requests: number }[];

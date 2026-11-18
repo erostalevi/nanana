@@ -8,6 +8,7 @@ const series = Array.from({ length: 60 }, (_, i) => ({
   minute: now - (59 - i) * 60_000,
   captured: i < 20 ? 0 : Math.round(12 + 10 * Math.sin(i / 4)),
   rejected: i % 9 === 0 ? 3 : 0,
+  shed: i >= 40 && i < 48 ? 20 + (i - 40) * 15 : 0, // an overload burst
   tunneled: i % 3 === 0 ? 4 : 0,
   avgLatencyMs: 40 + (i % 7) * 5,
   maxLatencyMs: 120,
@@ -28,6 +29,7 @@ const stats = {
     lastFiveMinutes: 70,
     lastHour: 640,
     rejectedLastHour: 18,
+    shedLastHour: series.reduce((a, m) => a + m.shed, 0),
     tunneledLastHour: 212,
     avgLatencyMs: 52,
     topEndpoints: [{ slug: 'k7x2m9qa', requests: 311 }, { slug: 'my-shop', requests: 120 }],

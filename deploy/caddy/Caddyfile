@@ -114,6 +114,13 @@ nanana.lat, www.nanana.lat {
 	import security_headers
 	import access_log
 
+	# Webhook ingress hosts (everything except api.nanana.lat) can see hundreds of requests per
+	# second; one access-log line each costs CPU and disk on a small box. Skip those lines.
+	# Error-level logs (upstream failures etc.) are separate and still written, and every
+	# capture is visible in the app and in the API's own metrics.
+	@ingress not host api.nanana.lat
+	log_skip @ingress
+
 	# Largest accepted body is 10 MB (accounts); leave headroom for framing.
 	request_body {
 		max_size 12MB

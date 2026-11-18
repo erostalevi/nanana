@@ -10,8 +10,11 @@ import { PRICES } from '../config/plan-limits.js';
 import { q } from '../db/query.js';
 import { TunnelService } from '../tunnel/tunnel.service.js';
 import { MetricsService } from './metrics.service.js';
+import { uuidV7Floor } from './uuid-floor.js';
 
 const MB = 1024 * 1024;
+const CACHE_MS = 2000; // /admin/stats is computed once per this window and shared by all open admin tabs
+const cacheMs = () => Number(process.env.ADMIN_STATS_CACHE_MS ?? CACHE_MS); // 0 disables (tests)
 const DATA_VOLUME_MB = 10240; // the EBS data volume Postgres lives on (see infra/compute.tf)
 
 async function memAvailableMb(): Promise<number> {
@@ -34,10 +37,24 @@ export class AdminController {
     @Inject(MetricsService) private readonly metrics: MetricsService,
   ) {}
 
+  private cache?: { at: number; value: Promise<Record<string, unknown>> };
+
   @Get('stats')
   async stats(@Req() req: Request) {
     const p = await this.access.requireAccount(req);
     if (!this.cfg.adminEmails.includes(p.email.toLowerCase())) throw forbidden('Admin only');
+    const now = Date.now();
+    if (!this.cache || now - this.cache.at >= cacheMs()) {
+      const value = this.compute();
+      this.cache = { at: now, value };
+      value.catch(() => {
+        if (this.cache?.value === value) this.cache = undefined; // never cache a failure
+      });
+    }
+    return this.cache.value;
+  }
+
+  private async compute() {
     const n = (v: unknown) => Number(v ?? 0);
 
     const [accts] = await q<{ n: string; day: string; week: string }[]>(
@@ -55,14 +72,18 @@ export class AdminController {
               count(*) FILTER (WHERE owner_id IS NULL) AS anonymous, count(*) FILTER (WHERE is_custom) AS custom,
               count(*) FILTER (WHERE created_at > now() - interval '24 hours') AS created24 FROM subdomain`,
     );
-    const [reqs] = await q<{ total: string; hour: string }[]>(
+    // Approximate row count from the planner statistics (a count(*) over the whole table gets slower as it grows).
+    const [reqs] = await q<{ total: string }[]>(
       this.ds,
-      `SELECT count(*) AS total, count(*) FILTER (WHERE received_at > now() - interval '1 hour') AS hour FROM captured_request`,
+      `SELECT coalesce(max(n_live_tup), 0) AS total FROM pg_stat_user_tables WHERE relname = 'captured_request'`,
     );
+    // Last hour via the primary key: UUIDv7 ids are time-ordered, so no received_at index is needed.
+    const hourFloor = uuidV7Floor(Date.now() - 3600_000);
     const top = await q<{ slug: string; n: string }[]>(
       this.ds,
       `SELECT s.slug, count(*) AS n FROM captured_request r JOIN subdomain s ON s.id = r.subdomain_id
-       WHERE r.received_at > now() - interval '1 hour' GROUP BY s.slug ORDER BY n DESC LIMIT 5`,
+       WHERE r.id >= $1::uuid GROUP BY s.slug ORDER BY n DESC LIMIT 5`,
+      [hourFloor],
     );
 
     // revenue, estimated from our own subscription table (Polar remains the source of truth for money actually collected)
@@ -94,8 +115,8 @@ export class AdminController {
     const latencyWeighted = series.slice(-10).reduce((a, b) => a + b.avgLatencyMs * b.captured, 0);
     const latencyCount = series.slice(-10).reduce((a, b) => a + b.captured, 0);
 
-    let online = 0;
-    for (const r of await q<{ id: string }[]>(this.ds, 'SELECT id FROM subdomain')) if (this.tunnels.isOnline(r.id)) online++;
+    const online = this.tunnels.onlineCount;
+    const lastHour = series.reduce((a, b) => a + b.captured, 0);
     const cpus = os.cpus().length;
     const load1 = os.loadavg()[0];
     const loop = this.metrics.eventLoop();
@@ -105,7 +126,7 @@ export class AdminController {
       subdomains: { total: n(subs.total), active: n(subs.active), cold: n(subs.cold), anonymous: n(subs.anonymous), custom: n(subs.custom) },
       tunnelsOnline: online,
       capturedRequests: n(reqs.total),
-      requestsLastHour: n(reqs.hour),
+      requestsLastHour: lastHour, // from the in-memory series: covers the time since the API last restarted
       uptimeSeconds: Math.round(process.uptime()),
       version: process.env.APP_VERSION ?? '0.1.0',
       // ---- richer overview (additive) ----
@@ -115,7 +136,8 @@ export class AdminController {
         series,
         perMinuteNow: Math.round(perMinNow / 2),
         lastFiveMinutes: lastFive.reduce((a, b) => a + b.captured, 0),
-        lastHour: series.reduce((a, b) => a + b.captured, 0),
+        lastHour,
+        shedLastHour: series.reduce((a, b) => a + (b.shed ?? 0), 0),
         rejectedLastHour: series.reduce((a, b) => a + b.rejected, 0),
         tunneledLastHour: series.reduce((a, b) => a + b.tunneled, 0),
         avgLatencyMs: latencyCount ? Math.round(latencyWeighted / latencyCount) : 0,

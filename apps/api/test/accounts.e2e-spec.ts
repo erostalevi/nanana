@@ -192,6 +192,13 @@ describe('device flow (CLI login)', () => {
 });
 
 describe('admin stats', () => {
+  beforeAll(() => {
+    process.env.ADMIN_STATS_CACHE_MS = '0'; // /admin/stats is cached for 2 s in production
+  });
+  afterAll(() => {
+    delete process.env.ADMIN_STATS_CACHE_MS;
+  });
+
   it('is restricted to ADMIN_EMAILS', async () => {
     const cookie = await login('boss@example.com');
     expect((await as(cookie, 'get', '/admin/stats')).status).toBe(403);
