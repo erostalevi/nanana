@@ -216,7 +216,7 @@ export class TunnelService implements OnApplicationShutdown {
     }
     if (this.conns.get(conn.subId) !== conn) return; // already replaced
     this.conns.delete(conn.subId);
-    void q(this.ds, 'UPDATE subdomain SET last_activity_at = now() WHERE id = $1', [conn.subId]);
+    void q(this.ds, 'UPDATE subdomain SET last_activity_at = now() WHERE id = $1', [conn.subId]).catch(() => {});
     this.events.emit(conn.slug, 'tunnel.status', { online: false, target: null });
   }
 }

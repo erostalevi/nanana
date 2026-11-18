@@ -4,6 +4,7 @@ import { ApiError, badRequest } from '../common/errors.js';
 import { q } from '../db/query.js';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { GRACE_DAYS, LAPSED_READ_ONLY_DAYS, isProLike, limitsFor } from '../config/plan-limits.js';
+import { SubdomainsService } from '../subdomains/subdomains.service.js';
 import { PolarGateway, type PolarEvent, type PolarSubscription } from './polar.gateway.js';
 
 export interface SubscriptionRow {
@@ -36,6 +37,7 @@ export class BillingService {
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     @Inject(PolarGateway) private readonly polar: PolarGateway,
+    @Inject(SubdomainsService) private readonly subs: SubdomainsService,
   ) {}
 
   get enabled(): boolean {
@@ -167,6 +169,7 @@ export class BillingService {
       [accountId, customerId, sub.id, status, interval, periodEnd, !!sub.cancel_at_period_end, graceUntil, lapsedUntil],
     );
     await q(this.ds, 'UPDATE account SET plan = $2 WHERE id = $1', [accountId, newPlan]);
+    this.subs.invalidateAll(); // the webhook endpoint lookup cache holds the owner's plan
   }
 
   // ---- periodic transitions (called from the lifecycle tick) -----------------------
@@ -180,6 +183,7 @@ export class BillingService {
       [String(LAPSED_READ_ONLY_DAYS)],
     );
     for (const r of lapse) await q(this.ds, `UPDATE account SET plan = 'lapsed' WHERE id = $1`, [r.account_id]);
+    if (lapse.length) this.subs.invalidateAll();
 
     // Read-only window over: back to free rules.
     const done = await q<{ account_id: string }[]>(
@@ -195,6 +199,7 @@ export class BillingService {
   async downgradeToFree(accountId: string): Promise<void> {
     const free = limitsFor('free');
     await q(this.ds, `UPDATE account SET plan = 'free' WHERE id = $1`, [accountId]);
+    this.subs.invalidateAll();
     await q(this.ds, `UPDATE subscription SET lapsed_until = NULL, grace_until = NULL WHERE account_id = $1`, [accountId]);
     await q(this.ds, `UPDATE slug_tombstone SET until = now() + interval '7 days' WHERE owner_id = $1 AND until = 'infinity'`, [accountId]);
     await q(this.ds, `UPDATE subdomain SET state = 'active', last_activity_at = now(), hard_expires_at = now() + interval '7 days', renewed_at = NULL WHERE owner_id = $1`, [accountId]);
