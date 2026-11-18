@@ -202,6 +202,34 @@ describe('admin stats', () => {
     expect(r.body.subdomains).toMatchObject({ total: 0 });
     cfg().adminEmails = [];
   });
+
+  it('reports live traffic, growth, revenue and server health', async () => {
+    cfg().adminEmails = ['boss2@example.com'];
+    try {
+      const cookie = await login('boss2@example.com');
+      const a = await h.create();
+      for (let i = 0; i < 3; i++) await h.ingress(a.slug).send(`hit ${i}`);
+      await h.ingress('nosuchslug1').send('x'); // 404: counted as rejected
+      await h.ds.query(`UPDATE account SET plan = 'pro' WHERE email = 'boss2@example.com'`);
+      await h.ds.query(
+        `INSERT INTO subscription (account_id, status, interval) SELECT id, 'active', 'year' FROM account WHERE email = 'boss2@example.com'`,
+      );
+      const r = (await as(cookie, 'get', '/admin/stats')).body;
+      expect(r.traffic.series).toHaveLength(60);
+      expect(r.traffic.lastHour).toBeGreaterThanOrEqual(3);
+      expect(r.traffic.rejectedLastHour).toBeGreaterThanOrEqual(1);
+      expect(r.traffic.topEndpoints[0]).toMatchObject({ slug: a.slug, requests: 3 });
+      expect(r.growth).toMatchObject({ signups24h: expect.any(Number), plans: { pro: 1 } });
+      expect(r.growth.endpointsCreated24h).toBeGreaterThanOrEqual(1);
+      expect(r.revenue).toMatchObject({ payingSubscribers: 1, yearly: 1, monthly: 0, mrrCents: Math.round(8000 / 12), arrCents: Math.round(8000 / 12) * 12 });
+      expect(r.health.db.pingMs).toBeGreaterThanOrEqual(0);
+      expect(r.health.db.volumeMb).toBe(10240);
+      expect(r.health.memAvailableMb).toBeGreaterThan(0);
+      expect(r.health.apiRssMb).toBeGreaterThan(0);
+    } finally {
+      cfg().adminEmails = [];
+    }
+  });
 });
 
 describe('oauth', () => {

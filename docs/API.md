@@ -161,6 +161,13 @@ Extra error codes: ingress `402 endpoint_read_only` (lapsed owner); tunnel upgra
 ## Admin (read-only, owner only)
 
 `GET /admin/stats` (session of an account whose email is in `ADMIN_EMAILS`; 403 otherwise) -> `{ accounts: number, subdomains: { total, active, cold, anonymous, custom }, tunnelsOnline: number, capturedRequests: number, requestsLastHour: number, uptimeSeconds: number, version: string }`.
+
+The response keeps the original fields (`accounts`, `subdomains`, `tunnelsOnline`, `capturedRequests`, `requestsLastHour`, `uptimeSeconds`, `version`) and adds, for the `/admin` dashboard (polled every 5 s):
+
+- `traffic`: `series` (60 one-minute buckets, oldest first: `captured`, `rejected`, `tunneled`, `avgLatencyMs`, `maxLatencyMs`), `perMinuteNow`, `lastFiveMinutes`, `lastHour`, `rejectedLastHour`, `tunneledLastHour`, `avgLatencyMs`, `topEndpoints[{slug, requests}]`, and `since`. Counters are in memory, so they reset when the API restarts.
+- `growth`: `signups24h`, `signups7d`, `endpointsCreated24h`, `plans` (accounts per plan).
+- `revenue`: `mrrCents`, `arrCents`, `payingSubscribers`, `monthly`, `yearly`, `pastDue`, `cancelingAtPeriodEnd`, `billingEnabled`. Estimated from our `subscription` table, not from Polar.
+- `health`: CPU load, available memory, API RSS and heap, event-loop delay, and database latency, size, captures-table size, connections and volume size.
 `GET /auth/providers` (public) -> `{ github: boolean, google: boolean, magic: true }`.
 
 ## Misc

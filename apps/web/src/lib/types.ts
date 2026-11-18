@@ -108,6 +108,7 @@ export type MeResponse = {
 export type Providers = { github: boolean; google: boolean; magic: true };
 export type CliToken = { id: string; name: string; createdAt: string; lastUsedAt: string | null };
 
+export type AdminMinute = { minute: number; captured: number; rejected: number; tunneled: number; avgLatencyMs: number; maxLatencyMs: number };
 export type AdminStats = {
   accounts: number;
   subdomains: { total: number; active: number; cold: number; anonymous: number; custom: number };
@@ -116,6 +117,42 @@ export type AdminStats = {
   requestsLastHour: number;
   uptimeSeconds: number;
   version: string;
+  generatedAt: string;
+  traffic: {
+    since: string;
+    series: AdminMinute[];
+    perMinuteNow: number;
+    lastFiveMinutes: number;
+    lastHour: number;
+    rejectedLastHour: number;
+    tunneledLastHour: number;
+    avgLatencyMs: number;
+    topEndpoints: { slug: string; requests: number }[];
+  };
+  growth: { signups24h: number; signups7d: number; endpointsCreated24h: number; plans: Record<string, number> };
+  revenue: {
+    currency: string;
+    mrrCents: number;
+    arrCents: number;
+    payingSubscribers: number;
+    monthly: number;
+    yearly: number;
+    pastDue: number;
+    cancelingAtPeriodEnd: number;
+    billingEnabled: boolean;
+  };
+  health: {
+    cpus: number;
+    load1: number;
+    loadPct: number;
+    memAvailableMb: number;
+    memTotalMb: number;
+    apiRssMb: number;
+    apiHeapMb: number;
+    eventLoopP99Ms: number;
+    eventLoopMaxMs: number;
+    db: { pingMs: number; sizeMb: number; capturesMb: number; connections: number; volumeMb: number };
+  };
 };
 
 export type CreatedSubdomain = { subdomain: Subdomain; token: string; dashboardUrlWithToken: string };

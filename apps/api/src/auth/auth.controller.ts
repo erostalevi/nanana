@@ -150,28 +150,4 @@ export class AuthController {
     if (typeof body?.userCode !== 'string') throw badRequest('invalid_request', 'userCode is required');
     await this.accounts.approveDevice(p.accountId, body.userCode);
   }
-
-  @Get('admin/stats')
-  async stats(@Req() req: Request) {
-    const p = await this.access.requireAccount(req);
-    if (!this.cfg.adminEmails.includes(p.email.toLowerCase())) throw forbidden('Admin only');
-    const [accts] = await q<{ n: string }[]>(this.ds, 'SELECT count(*) AS n FROM account');
-    const [subs] = await q<{ total: string; active: string; cold: string; anonymous: string; custom: string }[]>(
-      this.ds,
-      `SELECT count(*) AS total, count(*) FILTER (WHERE state='active') AS active, count(*) FILTER (WHERE state='cold') AS cold,
-              count(*) FILTER (WHERE owner_id IS NULL) AS anonymous, count(*) FILTER (WHERE is_custom) AS custom FROM subdomain`,
-    );
-    const [reqs] = await q<{ total: string; hour: string }[]>(this.ds, `SELECT count(*) AS total, count(*) FILTER (WHERE received_at > now() - interval '1 hour') AS hour FROM captured_request`);
-    let online = 0;
-    for (const r of await q<{ id: string }[]>(this.ds, 'SELECT id FROM subdomain')) if (this.tunnels.isOnline(r.id)) online++;
-    return {
-      accounts: Number(accts.n),
-      subdomains: { total: Number(subs.total), active: Number(subs.active), cold: Number(subs.cold), anonymous: Number(subs.anonymous), custom: Number(subs.custom) },
-      tunnelsOnline: online,
-      capturedRequests: Number(reqs.total),
-      requestsLastHour: Number(reqs.hour),
-      uptimeSeconds: Math.round(process.uptime()),
-      version: process.env.APP_VERSION ?? '0.1.0',
-    };
-  }
 }

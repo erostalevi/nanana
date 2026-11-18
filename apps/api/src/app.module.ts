@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { AdminController } from './admin/admin.controller.js';
+import { MetricsService } from './admin/metrics.service.js';
 import { ACCOUNT_RESOLVER, AccessService } from './auth/access.service.js';
 import { AccountsService } from './auth/accounts.service.js';
 import { AuthController } from './auth/auth.controller.js';
@@ -23,8 +25,9 @@ import { TunnelService } from './tunnel/tunnel.service.js';
 
 @Module({
   imports: [DbModule],
-  controllers: [HealthController, SubdomainsController, RequestsController, AuthController, BillingController],
+  controllers: [HealthController, SubdomainsController, RequestsController, AuthController, BillingController, AdminController],
   providers: [
+    MetricsService,
     EventsService,
     TunnelService,
     TunnelGateway,

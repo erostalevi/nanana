@@ -9,6 +9,7 @@ import { isLoadtest } from '../common/loadtest.js';
 import { RateLimiter } from '../common/rate-limiter.js';
 import { PayloadTooLarge, rawHeaders, readBody, stripHopByHop, type HeaderMap } from '../common/http.js';
 import { resolveHost } from '../hosts/host-resolver.js';
+import { MetricsService } from '../admin/metrics.service.js';
 import { EventsService } from '../events/events.service.js';
 import { MocksService } from '../mocks/mocks.service.js';
 import { RequestsService } from '../requests/requests.service.js';
@@ -39,6 +40,7 @@ export class IngressService {
     @Inject(EventsService) private readonly events: EventsService,
     @Inject(TunnelService) private readonly tunnels: TunnelService,
     @Inject(MocksService) private readonly mocks: MocksService,
+    @Inject(MetricsService) private readonly metrics: MetricsService,
   ) {}
 
   /** Express middleware: handles <slug>.<base> hosts, passes everything else on. */
@@ -63,21 +65,31 @@ export class IngressService {
     const sub = await this.subs.getBySlug(slug);
     if (!sub) {
       const tomb = await q(this.ds, 'SELECT 1 FROM slug_tombstone WHERE slug = $1 AND until > now()', [slug]);
+      this.metrics.rejected();
       if (tomb.length) return this.send(res, 410, '{"error":"gone","message":"This subdomain expired."}');
       return this.send(res, 404, '{"error":"not_found","message":"This subdomain does not exist or has expired."}');
     }
 
     const plan = sub.owner_id ? (sub.owner_plan ?? 'free') : null;
-    if (isLapsed(plan)) return this.send(res, 402, '{"error":"endpoint_read_only","message":"The owner of this endpoint has no active plan. It is read-only and not capturing new requests."}');
+    if (isLapsed(plan)) {
+      this.metrics.rejected();
+      return this.send(res, 402, '{"error":"endpoint_read_only","message":"The owner of this endpoint has no active plan. It is read-only and not capturing new requests."}');
+    }
     const limits = limitsFor(plan);
     const wait = isLoadtest(this.cfg, req) ? 0 : this.limiter.take(`sub:${sub.id}`, limits.ratePerMinute);
-    if (wait > 0) return this.send(res, 429, '{"error":"rate_limited"}', { 'retry-after': String(wait) });
+    if (wait > 0) {
+      this.metrics.rejected();
+      return this.send(res, 429, '{"error":"rate_limited"}', { 'retry-after': String(wait) });
+    }
 
     let body: Buffer;
     try {
       body = await readBody(req, Math.min(limits.maxBodyBytes, limits.retentionMaxBytes));
     } catch (e) {
-      if (e instanceof PayloadTooLarge) return this.send(res, 413, '{"error":"payload_too_large"}', { connection: 'close' });
+      if (e instanceof PayloadTooLarge) {
+        this.metrics.rejected();
+        return this.send(res, 413, '{"error":"payload_too_large"}', { connection: 'close' });
+      }
       throw e;
     }
 
@@ -155,6 +167,7 @@ export class IngressService {
     }
     res.setHeader('content-length', String(outBody.length));
     res.end(req.method === 'HEAD' ? undefined : outBody);
+    this.metrics.answered(Date.now() - started, answeredBy === 'tunnel');
 
     // Record what was actually sent.
     const truncated = outBody.length > MAX_STORED_RESPONSE;
