@@ -83,6 +83,13 @@ export class MetricsService {
     return { p50Ms: ms(this.loop.percentile(50)), p99Ms: ms(this.loop.percentile(99)), maxMs: ms(this.loop.max) };
   }
 
+  /** p99 event-loop delay (ms) since the last call, then resets the histogram. Used by LoadService every 250 ms. */
+  takeEventLoopP99Ms(): number {
+    const ns = this.loop.percentile(99);
+    this.loop.reset();
+    return Number.isFinite(ns) ? ns / 1e6 : 0;
+  }
+
   resetEventLoop(): void {
     this.loop.reset();
   }
