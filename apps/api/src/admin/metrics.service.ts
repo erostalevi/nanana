@@ -9,6 +9,7 @@ interface Bucket {
   minute: number; // epoch minute
   captured: number;
   rejected: number;
+  shed: number;
   tunneled: number;
   latencySumMs: number;
   latencyMaxMs: number;
@@ -32,7 +33,7 @@ export class MetricsService {
     const minute = Math.floor(now / 60_000);
     let b = this.buckets.get(minute);
     if (!b) {
-      b = { minute, captured: 0, rejected: 0, tunneled: 0, latencySumMs: 0, latencyMaxMs: 0 };
+      b = { minute, captured: 0, rejected: 0, shed: 0, tunneled: 0, latencySumMs: 0, latencyMaxMs: 0 };
       this.buckets.set(minute, b);
       for (const k of this.buckets.keys()) if (k <= minute - MINUTES) this.buckets.delete(k);
     }
@@ -42,6 +43,11 @@ export class MetricsService {
   /** A request reached an endpoint and was refused (unknown, expired, read-only, rate limited, too large). */
   rejected(): void {
     this.bucket().rejected++;
+  }
+
+  /** A webhook was refused by load shedding (503). Counted separately from `rejected` (404, 429, 413, read-only). */
+  shed(): void {
+    this.bucket().shed++;
   }
 
   /** A request was captured and answered; `viaTunnel` when it was forwarded to a CLI. */
@@ -56,13 +62,14 @@ export class MetricsService {
   /** Last 60 minutes, oldest first, zero-filled. */
   series(now = Date.now()) {
     const current = Math.floor(now / 60_000);
-    const out: { minute: number; captured: number; rejected: number; tunneled: number; avgLatencyMs: number; maxLatencyMs: number }[] = [];
+    const out: { minute: number; captured: number; rejected: number; shed: number; tunneled: number; avgLatencyMs: number; maxLatencyMs: number }[] = [];
     for (let m = current - MINUTES + 1; m <= current; m++) {
       const b = this.buckets.get(m);
       out.push({
         minute: m * 60_000,
         captured: b?.captured ?? 0,
         rejected: b?.rejected ?? 0,
+        shed: b?.shed ?? 0,
         tunneled: b?.tunneled ?? 0,
         avgLatencyMs: b && b.captured ? Math.round(b.latencySumMs / b.captured) : 0,
         maxLatencyMs: b?.latencyMaxMs ?? 0,
