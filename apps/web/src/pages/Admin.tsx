@@ -65,25 +65,35 @@ function TrafficChart({ series }: { series: AdminMinute[] }) {
   const H = 120;
   const gap = 2;
   const bw = W / series.length - gap;
-  const max = Math.max(5, ...series.map((m) => m.captured + m.rejected));
+  const max = Math.max(5, ...series.map((m) => m.captured + m.rejected + (m.shed ?? 0)));
   const total = series.reduce((a, m) => a + m.captured, 0);
   const peak = Math.max(...series.map((m) => m.captured));
+  const shedTotal = series.reduce((a, m) => a + (m.shed ?? 0), 0);
   return (
     <figure>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-32 w-full" role="img" aria-label={`Requests per minute over the last hour: ${total} captured, peak ${peak} per minute`}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-32 w-full" role="img" aria-label={`Requests per minute over the last hour: ${total} captured, ${shedTotal} shed (503), peak ${peak} per minute`}>
+        <defs>
+          {/* amber is close to the captured colour, so shed bars are striped: distinguishable without relying on hue */}
+          <pattern id="shed-stripes" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="4" height="4" fill="rgb(var(--panel))" />
+            <rect width="2" height="4" fill="rgb(var(--warn))" />
+          </pattern>
+        </defs>
         {[0.5, 1].map((f) => (
           <line key={f} x1="0" x2={W} y1={H - H * f} y2={H - H * f} stroke="rgb(var(--line))" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
         ))}
         {series.map((m, i) => {
           const hc = (m.captured / max) * (H - 6);
           const hr = (m.rejected / max) * (H - 6);
+          const hs = ((m.shed ?? 0) / max) * (H - 6);
           const x = i * (bw + gap);
           const live = i === series.length - 1;
           return (
             <g key={m.minute}>
-              <title>{`${new Date(m.minute).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: ${m.captured} captured, ${m.rejected} refused`}</title>
+              <title>{`${new Date(m.minute).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: ${m.captured} captured, ${m.rejected} refused, ${m.shed ?? 0} shed (503)`}</title>
               <rect x={x} y={H - hc} width={bw} height={Math.max(hc, m.captured ? 1 : 0)} fill="rgb(var(--accent))" opacity={live ? 0.55 : 1} />
               <rect x={x} y={H - hc - hr} width={bw} height={hr} fill="rgb(var(--bad))" opacity="0.85" />
+              <rect x={x} y={H - hc - hr - hs} width={bw} height={hs} fill="url(#shed-stripes)" stroke="rgb(var(--warn))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
             </g>
           );
         })}
@@ -93,6 +103,7 @@ function TrafficChart({ series }: { series: AdminMinute[] }) {
         <span className="flex flex-wrap gap-x-3">
           <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-accent align-middle" />captured</span>
           <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-bad align-middle" />refused (404, 429, 413, read-only)</span>
+          <span><span className="mr-1 inline-block h-2 w-2 rounded-sm border border-warn align-middle" style={{ backgroundImage: 'repeating-linear-gradient(45deg, rgb(var(--warn)) 0 1px, transparent 1px 3px)' }} />shed (503, overloaded)</span>
         </span>
         <span>now</span>
       </figcaption>
@@ -126,7 +137,7 @@ export function Admin() {
               <Stat label="Requests / min" value={d.traffic.perMinuteNow} sub={`${num(d.traffic.lastFiveMinutes)} in the last 5 min`} />
               <Stat label="Last hour" value={num(d.traffic.lastHour)} sub={`${num(d.traffic.tunneledLastHour)} answered by a tunnel`} />
               <Stat label="Avg response time" value={`${d.traffic.avgLatencyMs} ms`} sub="last 10 min, end to end" tone={d.traffic.avgLatencyMs > 1000 ? 'bad' : d.traffic.avgLatencyMs > 400 ? 'warn' : undefined} />
-              <Stat label="Refused, last hour" value={num(d.traffic.rejectedLastHour)} sub="404, rate limit, too large" />
+              <Stat label="Refused, last hour" value={num(d.traffic.rejectedLastHour)} sub={`404, rate limit, too large · ${num(d.traffic.shedLastHour ?? 0)} shed (503)`} />
             </dl>
             <div className="card mt-3 p-4">
               <TrafficChart series={d.traffic.series} />

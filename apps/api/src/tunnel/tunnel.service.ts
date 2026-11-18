@@ -68,6 +68,11 @@ export class TunnelService implements OnApplicationShutdown {
     @Inject(EventsService) private readonly events: EventsService,
   ) {}
 
+  /** Tunnels currently connected (size of the in-memory map). */
+  get onlineCount(): number {
+    return this.conns.size;
+  }
+
   isOnline(subId: string): boolean {
     return this.conns.has(subId);
   }
