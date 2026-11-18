@@ -49,7 +49,7 @@ export class BillingController {
   @HttpCode(200)
   async webhook(@Req() req: Request) {
     if (!Buffer.isBuffer(req.body)) throw badRequest('invalid_body', 'Expected a raw body');
-    await this.billing.handleWebhook(req.body, req.headers['stripe-signature'] as string | undefined);
+    await this.billing.handleWebhook(req.body, req.headers);
     return { received: true };
   }
 }

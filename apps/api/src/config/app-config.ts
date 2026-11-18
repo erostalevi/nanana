@@ -26,11 +26,13 @@ export interface AppConfig {
   replayAllowPrivate: boolean;
   /** Operator-only secret: lets tools/loadtest skip the per-IP creation limit and per-sub rate limit. */
   loadtestToken: string;
-  stripeSecretKey: string;
-  stripeWebhookSecret: string;
-  stripePriceMonthly: string;
-  stripePriceYearly: string;
-  stripeTax: boolean;
+  /** Polar organization access token, webhook signing secret, and the two subscription product ids. */
+  polarAccessToken: string;
+  polarWebhookSecret: string;
+  polarProductMonthly: string;
+  polarProductYearly: string;
+  /** 'production' (api.polar.sh) or 'sandbox' (sandbox-api.polar.sh). */
+  polarServer: 'production' | 'sandbox';
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -74,11 +76,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     runJobs: env.RUN_JOBS !== 'false',
     replayAllowPrivate: env.REPLAY_ALLOW_PRIVATE === 'true',
     loadtestToken: env.LOADTEST_TOKEN ?? '',
-    stripeSecretKey: env.STRIPE_SECRET_KEY ?? '',
-    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
-    stripePriceMonthly: env.STRIPE_PRICE_MONTHLY ?? '',
-    stripePriceYearly: env.STRIPE_PRICE_YEARLY ?? '',
-    stripeTax: env.STRIPE_TAX === 'true',
+    polarAccessToken: env.POLAR_ACCESS_TOKEN ?? '',
+    polarWebhookSecret: env.POLAR_WEBHOOK_SECRET ?? '',
+    polarProductMonthly: env.POLAR_PRODUCT_MONTHLY ?? '',
+    polarProductYearly: env.POLAR_PRODUCT_YEARLY ?? '',
+    polarServer: env.POLAR_SERVER === 'sandbox' ? 'sandbox' : 'production',
   };
 }
 

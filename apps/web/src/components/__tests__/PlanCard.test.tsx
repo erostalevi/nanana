@@ -42,7 +42,7 @@ describe('PlanCard', () => {
   });
 
   it('free: shows usage and starts a monthly checkout then redirects', async () => {
-    fetchMock.mockResolvedValue(json(200, { url: 'https://checkout.stripe.test/s/1' }));
+    fetchMock.mockResolvedValue(json(200, { url: 'https://checkout.polar.test/s/1' }));
     mount(<PlanCard me={me('free')} billing={billing()} subdomains={[sub('a'), sub('b', { isCustom: true })]} />);
     expect(screen.getByText('Free')).toBeInTheDocument();
     expect(screen.getByText('No subscription')).toBeInTheDocument();
@@ -51,14 +51,14 @@ describe('PlanCard', () => {
     expect(screen.queryByRole('button', { name: /Manage billing/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Upgrade, \$80\/year/ })).toHaveTextContent('save $16');
     await userEvent.click(screen.getByRole('button', { name: 'Upgrade, $8/month' }));
-    await waitFor(() => expect(go).toHaveBeenCalledWith('https://checkout.stripe.test/s/1'));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('https://checkout.polar.test/s/1'));
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('http://api.test/billing/checkout');
     expect(JSON.parse(init.body)).toEqual({ interval: 'month' });
   });
 
   it('pro: shows renewal date, reserved names and the portal button', async () => {
-    fetchMock.mockResolvedValue(json(200, { url: 'https://billing.stripe.test/p/1' }));
+    fetchMock.mockResolvedValue(json(200, { url: 'https://portal.polar.test/p/1' }));
     mount(<PlanCard me={me('pro')} billing={billing({ status: 'active', interval: 'month', currentPeriodEnd: '2027-01-10T12:00:00Z' })} subdomains={[sub('a', { alwaysOn: true })]} />);
     expect(screen.getByText('Pro')).toBeInTheDocument();
     expect(screen.getByText('Renews on')).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe('PlanCard', () => {
     expect(screen.getByText('1 of 25')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Upgrade/ })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: /Manage billing/ }));
-    await waitFor(() => expect(go).toHaveBeenCalledWith('https://billing.stripe.test/p/1'));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('https://portal.polar.test/p/1'));
     expect(fetchMock.mock.calls[0]![0]).toBe('http://api.test/billing/portal');
   });
 
@@ -140,9 +140,9 @@ describe('PlanCard', () => {
   });
 
   it('?upgrade=year starts the yearly checkout once', async () => {
-    fetchMock.mockResolvedValue(json(200, { url: 'https://checkout.stripe.test/s/2' }));
+    fetchMock.mockResolvedValue(json(200, { url: 'https://checkout.polar.test/s/2' }));
     mount(<PlanCard me={me('free')} billing={billing()} />, '/account?upgrade=year');
-    await waitFor(() => expect(go).toHaveBeenCalledWith('https://checkout.stripe.test/s/2'));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('https://checkout.polar.test/s/2'));
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({ interval: 'year' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

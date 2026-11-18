@@ -46,7 +46,7 @@ function go(r: { url?: unknown }) {
   nav.go(r.url);
 }
 
-/** POST /billing/checkout then redirect the browser to Stripe. The mutation stays "pending" after success. */
+/** POST /billing/checkout then redirect the browser to the hosted checkout. The mutation stays "pending" after success. */
 export function useCheckout() {
   return useMutation<{ url?: unknown }, unknown, Interval>({
     mutationFn: async (interval) => {

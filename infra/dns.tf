@@ -88,3 +88,13 @@ resource "aws_route53_record" "mx" {
   ttl     = 600
   records = ["10 inbound-smtp.${local.region}.amazonaws.com"]
 }
+
+# ---- Polar (merchant of record) domain verification -------------------------------
+
+resource "aws_route53_record" "polar_challenge" {
+  zone_id = local.zone_id
+  name    = "_polar-challenge.${var.domain}"
+  type    = "TXT"
+  ttl     = 600
+  records = ["Wk5gCBjpYLXY8ylIanOo2DL08R957cUg7W4gRDPWNC4"]
+}

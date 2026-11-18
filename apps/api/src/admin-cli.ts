@@ -17,7 +17,7 @@ const usage = `usage: admin-cli <command>
   disable-sub <slug>       delete a subdomain now (custom names get the 7-day tombstone)
   disable-account <email>  disable an account, delete its sessions/tokens and owned subdomains
   enable-account <email>   re-enable a disabled account
-  set-plan <email> <free|pro>   comp an account to Pro (no Stripe subscription) or move it back to free
+  set-plan <email> <free|pro>   comp an account to Pro (no paid subscription) or move it back to free
   find <slug|email>        show what we know about a subdomain or account`;
 
 if (!cmd || cmd === 'help') {

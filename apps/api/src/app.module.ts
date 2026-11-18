@@ -6,7 +6,7 @@ import { MailService } from './auth/mail.service.js';
 import { OAuthService } from './auth/oauth.service.js';
 import { BillingController } from './billing/billing.controller.js';
 import { BillingService } from './billing/billing.service.js';
-import { StripeGateway } from './billing/stripe.gateway.js';
+import { PolarGateway } from './billing/polar.gateway.js';
 import { DbModule } from './db/db.module.js';
 import { EventsService } from './events/events.service.js';
 import { HealthController } from './health/health.controller.js';
@@ -33,7 +33,7 @@ import { TunnelService } from './tunnel/tunnel.service.js';
     MailService,
     AccountsService,
     OAuthService,
-    StripeGateway,
+    PolarGateway,
     BillingService,
     { provide: ACCOUNT_RESOLVER, useExisting: AccountsService },
     MocksService,

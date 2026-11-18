@@ -99,10 +99,10 @@ export function Docs() {
         <p>A <strong>cold</strong> endpoint still captures; any activity (a request, a tunnel connection, opening the dashboard) wakes it up. A connected tunnel keeps it active. Over the limit you get <code>429</code> with a <code>Retry-After</code> header; bodies over the cap get <code>413</code>. Expired custom names answer <code>410</code> for 7 days and can only be re-created by their previous owner.</p>
 
         <h2 id="billing">Plans and billing</h2>
-        <p><strong>Pro</strong> costs $8 per month or $80 per year (two months free), tax excluded. Subscribe from the pricing section on the <Link to="/#pricing">home page</Link> or from <Link to="/account">/account</Link>; payment is handled by Stripe, nanana never sees your card. There is no trial: the free plan is the trial.</p>
+        <p><strong>Pro</strong> costs $8 per month or $80 per year (two months free), tax excluded. Subscribe from the pricing section on the <Link to="/#pricing">home page</Link> or from <Link to="/account">/account</Link>; payment is handled by Polar, our merchant of record, which also collects any sales tax or VAT; nanana never sees your card. There is no trial: the free plan is the trial.</p>
         <ul>
           <li><strong>Cancel any time</strong> from the billing portal (<strong>Manage billing</strong> on /account). Pro stays active until the end of the period you paid for.</li>
-          <li><strong>If a payment fails</strong>, Stripe retries and you keep Pro for a <strong>7-day grace period</strong>. Update your card in the billing portal during that time.</li>
+          <li><strong>If a payment fails</strong>, Polar retries and you keep Pro for a <strong>7-day grace period</strong>. Update your card in the billing portal during that time.</li>
           <li><strong>After the grace period</strong> your endpoints become <strong>read-only for 30 days</strong>: existing captures stay visible, new requests are not captured (senders get <code>402</code>) and reserved names stay reserved.</li>
           <li><strong>After those 30 days</strong> the free rules apply: idle death and the 7-day cap, reserved names are released, and endpoints beyond the free limit are archived, then deleted by the normal lifecycle.</li>
           <li><strong>Resubscribing</strong> during the read-only window restores everything.</li>

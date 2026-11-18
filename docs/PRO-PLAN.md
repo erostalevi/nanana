@@ -1,14 +1,15 @@
 # Pro plan (decisions, ready to build)
 
-Status: **built** (API, web UI, tests). Billing is dormant in production until Stripe keys are stored: until then `GET /billing/plans` reports `enabled: false` and the web app shows Pro as "Coming soon". Billing through **Stripe** (US entity via Atlas); start in Stripe **test mode**.
+Status: **built** (API, web UI, tests). Billing is dormant in production until Polar credentials are stored: until then `GET /billing/plans` reports `enabled: false` and the web app shows Pro as "Coming soon". Billing runs on **[Polar](https://polar.sh)** as merchant of record (no upfront cost, a percentage per sale; Polar collects and remits sales tax and VAT). Stripe was dropped because it does not onboard Chilean businesses directly.
 
 ## Turning it on
 
-1. Create a Stripe account (test mode is enough to start) and copy the secret key.
-2. `node tools/stripe/setup.mjs --key sk_test_xxx --apply` creates the product, the $8/month and $80/year prices, the webhook endpoint (`https://api.nanana.lat/billing/webhook`) and the customer portal, and stores `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, `STRIPE_TAX` in SSM under `/nanana/prod/`.
+1. In Polar, create the organization and two public subscription products: **nanana Pro (monthly)** at $8.00 USD and **nanana Pro (yearly)** at $80.00 USD. Add a webhook endpoint `https://api.nanana.lat/billing/webhook` (raw format) for the `subscription.*` events. Create an organization access token.
+2. `POLAR_ACCESS_TOKEN=polar_oat_xxx node tools/polar/setup.mjs --apply` checks the products and webhook (creating what is missing) and stores `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_PRODUCT_MONTHLY`, `POLAR_PRODUCT_YEARLY`, `POLAR_SERVER` in SSM under `/nanana/prod/`. Add `--sandbox` for a sandbox token. Run without `--apply` first to see what it would do.
 3. Redeploy (push to `main` or run the Deploy workflow). Billing turns on automatically.
-4. Going live later: run the same command with `--key sk_live_xxx --apply` (and `--tax` once Stripe Tax is set up).
-5. Comp an account without Stripe: `docker compose exec api node dist/admin-cli.js set-plan <email> pro` (or `free`).
+4. Comp an account without paying: `docker compose exec api node dist/admin-cli.js set-plan <email> pro` (or `free`).
+
+How it fits together: checkout passes our account id as Polar's `external_customer_id` and forces USD; the webhook (`subscription.created|active|updated|canceled|uncanceled|revoked|past_due`) carries the full subscription, which maps onto the plan state machine. Deliveries are verified with Standard Webhooks (HMAC-SHA256 over `webhook-id.timestamp.body`, 5-minute tolerance) and de-duplicated by `webhook-id` in the `webhook_event` table. The customer portal needs the customer to exist, so `/billing/portal` answers `409 no_customer` until the first subscription webhook has arrived.
 
 ## Plans
 
@@ -27,26 +28,15 @@ All numbers live in one config object (`PlanLimits` in `apps/api/src/config/plan
 
 ## Lapse policy
 
-1. Payment fails: Stripe retries; account keeps Pro for a **7-day grace period**.
+1. Payment fails: Polar retries; account keeps Pro for a **7-day grace period**.
 2. After grace: endpoints become **read-only for 30 days** (existing data visible, no new captures, reserved names stay reserved).
 3. After 30 days: free rules apply (idle death, 7-day cap), reserved names are released (with the normal 7-day tombstone for the previous owner), endpoints beyond the free limit are archived then deleted by the normal lifecycle.
 4. Re-subscribing during the read-only window restores everything.
 
 ## Tax
 
-Launch with Stripe Tax parameters wired in but switched off; enable Stripe Tax (0.5% per transaction) once registration thresholds are reached. Prices are shown tax-exclusive until then.
-
-## Build plan
-
-1. Data model: `subscription` (account_id, stripe_customer_id, stripe_subscription_id, status, current_period_end, grace_until, canceled_at), `account.plan` stays the source of truth for limits (`free` | `pro`), set only by the billing webhook or the admin CLI.
-2. `PlanLimits`: add `pro`, plus new fields (`reservedNames`, `alwaysOn`, `tunnelsPerAccount`, retention and rate per plan).
-3. Ingress and lifecycle read the **owner's real plan** (today owned endpoints assume `free`): join `account.plan` when loading the subdomain; skip idle death and the 7-day cap for always-on endpoints; read-only mode for lapsed accounts.
-4. Reserved names: `subdomain.reserved_until` (exists) managed by plan, with a dashboard toggle to mark which endpoints use the 10 reserved slots.
-5. Billing endpoints: `POST /billing/checkout` (Stripe Checkout session), `POST /billing/portal` (customer portal link), `POST /billing/webhook` (signature verified with the existing HMAC helper; idempotent by Stripe event id; handles `checkout.session.completed`, `customer.subscription.updated|deleted`, `invoice.payment_failed|paid`).
-6. Web: pricing section on the landing page and docs, `/account` plan card with upgrade/manage buttons, limits shown from `GET /me`.
-7. Tests: webhook signature and idempotency, plan transitions (grace, read-only, release), limits per plan; Stripe test-mode end to end with the Stripe CLI.
-8. Secrets (SSM): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`.
+Polar is the merchant of record: it calculates, collects and remits sales tax and VAT, so nanana does not register for tax collection. Prices are shown tax-exclusive; the checkout adds tax where it applies.
 
 ## Unit economics (rough)
 
-Fixed infra today about $15/month; a `t3.small` (about +$7.6) roughly doubles sustained capacity. At $8/month the Stripe fee is about $0.53, so about $7.47 net per subscriber. Atlas costs about $500 once plus about $500/year for the entity and agent, so break-even is roughly 12 subscribers.
+Fixed infra today about $15/month; a `t3.small` (about +$7.6) roughly doubles sustained capacity. Polar charges about 4% + $0.40 per transaction (confirm on their pricing page) plus Stripe Connect payout fees (about 0.25% + $0.25 per payout and $2 per active payout month), so roughly $0.75 to $0.90 on an $8 sale. There is no upfront cost, so break-even is the infra bill: about 2 subscribers.

@@ -120,7 +120,7 @@ describe('errors and redirects', () => {
     expect(billingErrorMessage(new ApiError(500, 'boom', 'Server broke'))).toBe('Server broke');
   });
   it('only accepts http(s) redirect URLs', () => {
-    expect(isRedirectUrl('https://checkout.stripe.com/c/pay/x')).toBe(true);
+    expect(isRedirectUrl('https://buy.polar.sh/polar_cl_x')).toBe(true);
     expect(isRedirectUrl('javascript:alert(1)')).toBe(false);
     expect(isRedirectUrl('/relative')).toBe(false);
     expect(isRedirectUrl(undefined)).toBe(false);

@@ -49,7 +49,7 @@ export async function harness(): Promise<Harness> {
     },
     async reset() {
       await ds.query('TRUNCATE subdomain, slug_tombstone CASCADE');
-      for (const t of ['account', 'identity', 'session', 'cli_token', 'device_auth', 'magic_link', 'subscription', 'stripe_event']) {
+      for (const t of ['account', 'identity', 'session', 'cli_token', 'device_auth', 'magic_link', 'subscription', 'webhook_event']) {
         await ds.query(`DO $$ BEGIN IF to_regclass('${t}') IS NOT NULL THEN EXECUTE 'TRUNCATE ${t} CASCADE'; END IF; END $$`);
       }
     },

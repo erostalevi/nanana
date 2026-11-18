@@ -150,11 +150,11 @@ Plans: `free`, `pro` ($8/month or $80/year), plus two transitional account state
 
 | Method | Path | Auth | Request | Response |
 |---|---|---|---|---|
-| GET | `/billing/plans` | none | | `{ enabled: boolean, currency: 'usd', plans: [{ id: 'free' \| 'pro', name: string, priceMonthlyCents: number, priceYearlyCents: number \| null, limits: Limits }] }` (`enabled` is false when Stripe is not configured) |
+| GET | `/billing/plans` | none | | `{ enabled: boolean, currency: 'usd', plans: [{ id: 'free' \| 'pro', name: string, priceMonthlyCents: number, priceYearlyCents: number \| null, limits: Limits }] }` (`enabled` is false when Polar is not configured) |
 | GET | `/billing` | account | | the `billing` object above plus `plan` |
-| POST | `/billing/checkout` | account (session) | `{ interval: 'month' \| 'year' }` | `200 { url }` (redirect the browser to Stripe Checkout). `404 billing_disabled`, `409 already_subscribed` |
-| POST | `/billing/portal` | account (session) | | `200 { url }` (Stripe customer portal). `409 no_customer` |
-| POST | `/billing/webhook` | Stripe signature | raw Stripe event | `200 { received: true }` (idempotent by event id); `400 invalid_signature` |
+| POST | `/billing/checkout` | account (session) | `{ interval: 'month' \| 'year' }` | `200 { url }` (redirect the browser to the Polar hosted checkout). `404 billing_disabled`, `409 already_subscribed` |
+| POST | `/billing/portal` | account (session) | | `200 { url }` (Polar customer portal). `409 no_customer` |
+| POST | `/billing/webhook` | Polar signature (Standard Webhooks: `webhook-id`, `webhook-timestamp`, `webhook-signature`) | raw Polar event | `200 { received: true }` (idempotent by `webhook-id`; only `subscription.*` events change state); `400 invalid_signature` |
 
 Extra error codes: ingress `402 endpoint_read_only` (lapsed owner); tunnel upgrade `403 tunnel_limit` (account already has its maximum simultaneous tunnels); `POST /subdomains` `403 limit_reached` now depends on the plan; `GET /me` etc. unchanged.
 

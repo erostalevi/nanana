@@ -35,7 +35,7 @@ export async function createApp(): Promise<NestExpressApplication> {
     next();
   });
 
-  // Stripe webhooks need the exact raw bytes for signature verification.
+  // Polar webhooks need the exact raw bytes for signature verification.
   app.use('/billing/webhook', express.raw({ type: '*/*', limit: '1mb' }));
 
   // 3. JSON bodies for the API only.

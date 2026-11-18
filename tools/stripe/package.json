@@ -1,9 +1,0 @@
-{
-  "name": "stripe-setup",
-  "private": true,
-  "type": "module",
-  "version": "0.1.0",
-  "description": "One-shot Stripe setup for nanana: product, prices, webhook endpoint, and the SSM parameters",
-  "scripts": { "setup": "node setup.mjs" },
-  "dependencies": { "stripe": "^23.1.0" }
-}

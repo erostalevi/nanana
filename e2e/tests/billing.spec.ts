@@ -92,7 +92,7 @@ test.describe('upgrade flow', () => {
     await pricing(page).getByRole('button', { name: /^Yearly/ }).click();
     await pricing(page).getByRole('button', { name: 'Upgrade to Pro' }).click();
     await expect(page).toHaveURL(CHECKOUT_URL);
-    await expect(page.getByRole('heading', { name: 'Fake Stripe Checkout' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Fake Polar Checkout' })).toBeVisible();
     expect(m.calls.filter((c) => c.path === '/billing/checkout')).toEqual([{ method: 'POST', path: '/billing/checkout', body: { interval: 'year' } }]);
   });
 

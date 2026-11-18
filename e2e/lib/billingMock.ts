@@ -2,7 +2,7 @@ import type { Page, Route } from '@playwright/test';
 import { API_URL } from './env';
 
 /**
- * Billing mocks for the browser: the real API has no Stripe in tests, so the billing routes (and /me, to put the
+ * Billing mocks for the browser: the real API has no payment provider in tests, so the billing routes (and /me, to put the
  * account in any plan) are answered by page.route. Everything not mocked here goes to the real API.
  */
 
@@ -62,8 +62,8 @@ export type Mock = {
   count(method: string, path: string): number;
 };
 
-export const CHECKOUT_URL = 'https://checkout.stripe.test/c/pay/cs_test_fake';
-export const PORTAL_URL = 'https://billing.stripe.test/p/session/test_fake';
+export const CHECKOUT_URL = 'https://checkout.polar.test/c/pay/fake';
+export const PORTAL_URL = 'https://portal.polar.test/p/session/fake';
 const err = (status: number, code: string) => ({ status, body: { error: { code, message: code } } });
 export const checkoutErrors = { disabled: err(404, 'billing_disabled'), subscribed: err(409, 'already_subscribed'), noCustomer: err(409, 'no_customer') };
 
@@ -81,7 +81,7 @@ export async function mockBilling(page: Page, init: Partial<Omit<Mock, 'calls' |
     ...init,
   };
   // Fake hosted pages so a redirect has somewhere to land (no network).
-  for (const [pattern, title] of [['https://checkout.stripe.test/**', 'Fake Stripe Checkout'], ['https://billing.stripe.test/**', 'Fake Stripe Portal']] as const) {
+  for (const [pattern, title] of [['https://checkout.polar.test/**', 'Fake Polar Checkout'], ['https://portal.polar.test/**', 'Fake Polar Portal']] as const) {
     await page.route(pattern, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: `<!doctype html><title>${title}</title><h1>${title}</h1>` }));
   }
   await page.route((u) => u.origin === API_URL, async (route: Route) => {

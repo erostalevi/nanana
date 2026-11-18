@@ -1,16 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type Stripe from 'stripe';
 import { DataSource } from 'typeorm';
 import { ApiError, badRequest } from '../common/errors.js';
 import { q } from '../db/query.js';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { GRACE_DAYS, LAPSED_READ_ONLY_DAYS, isProLike, limitsFor } from '../config/plan-limits.js';
-import { StripeGateway } from './stripe.gateway.js';
+import { PolarGateway, type PolarEvent, type PolarSubscription } from './polar.gateway.js';
 
 export interface SubscriptionRow {
   account_id: string;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
+  provider_customer_id: string | null;
+  provider_subscription_id: string | null;
   status: 'none' | 'active' | 'past_due' | 'canceled';
   interval: 'month' | 'year' | null;
   current_period_end: Date | null;
@@ -36,11 +35,11 @@ export class BillingService {
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
-    @Inject(StripeGateway) private readonly stripe: StripeGateway,
+    @Inject(PolarGateway) private readonly polar: PolarGateway,
   ) {}
 
   get enabled(): boolean {
-    return this.stripe.enabled;
+    return this.polar.enabled;
   }
 
   async get(accountId: string): Promise<SubscriptionRow | null> {
@@ -55,112 +54,73 @@ export class BillingService {
     if (!this.enabled) throw new ApiError(404, 'billing_disabled', 'Billing is not enabled');
   }
 
-  private async customerFor(accountId: string, email: string): Promise<string> {
-    const row = await this.get(accountId);
-    if (row?.stripe_customer_id) return row.stripe_customer_id;
-    const id = await this.stripe.createCustomer(email, accountId);
-    await q(
-      this.ds,
-      `INSERT INTO subscription (account_id, stripe_customer_id) VALUES ($1, $2)
-       ON CONFLICT (account_id) DO UPDATE SET stripe_customer_id = EXCLUDED.stripe_customer_id`,
-      [accountId, id],
-    );
-    return id;
-  }
-
   async checkout(account: { accountId: string; email: string; plan: string }, interval: unknown): Promise<string> {
     this.requireEnabled();
     if (interval !== 'month' && interval !== 'year') throw badRequest('invalid_interval', 'interval must be "month" or "year"');
     if (isProLike(account.plan)) throw new ApiError(409, 'already_subscribed', 'This account already has an active Pro subscription');
-    const customer = await this.customerFor(account.accountId, account.email);
-    return this.stripe.createCheckoutUrl({
-      customer,
+    return this.polar.createCheckoutUrl({
       accountId: account.accountId,
-      priceId: interval === 'month' ? this.cfg.stripePriceMonthly : this.cfg.stripePriceYearly,
+      email: account.email,
+      productId: interval === 'month' ? this.cfg.polarProductMonthly : this.cfg.polarProductYearly,
     });
   }
 
   async portal(accountId: string): Promise<string> {
     this.requireEnabled();
     const row = await this.get(accountId);
-    if (!row?.stripe_customer_id) throw new ApiError(409, 'no_customer', 'No billing profile yet: subscribe first');
-    return this.stripe.createPortalUrl(row.stripe_customer_id);
+    if (!row?.provider_customer_id) throw new ApiError(409, 'no_customer', 'No billing profile yet: subscribe first');
+    return this.polar.createPortalUrl(accountId);
   }
 
   // ---- webhook -----------------------------------------------------------------------
-  /** Verifies and applies a Stripe event. Idempotent by event id. */
-  async handleWebhook(rawBody: Buffer, signature: string | undefined): Promise<void> {
-    if (!this.cfg.stripeWebhookSecret) throw new ApiError(404, 'billing_disabled', 'Billing is not enabled');
-    if (!signature) throw badRequest('invalid_signature', 'Missing Stripe-Signature header');
-    let event: Stripe.Event;
+  /** Verifies and applies a Polar event. Idempotent by delivery id (`webhook-id`). */
+  async handleWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>): Promise<void> {
+    if (!this.cfg.polarWebhookSecret) throw new ApiError(404, 'billing_disabled', 'Billing is not enabled');
+    let event: PolarEvent;
     try {
-      event = this.stripe.constructEvent(rawBody, signature);
+      event = this.polar.verifyEvent(rawBody, headers);
     } catch {
-      throw badRequest('invalid_signature', 'Invalid Stripe signature');
+      throw badRequest('invalid_signature', 'Invalid webhook signature');
     }
-    const fresh = await q<{ id: string }[]>(this.ds, 'INSERT INTO stripe_event (id, type) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING RETURNING id', [event.id, event.type]);
+    const fresh = await q<{ id: string }[]>(this.ds, 'INSERT INTO webhook_event (id, type) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING RETURNING id', [event.id, event.type]);
     if (!fresh.length) return; // already processed
     try {
       await this.apply(event);
     } catch (e) {
-      await q(this.ds, 'DELETE FROM stripe_event WHERE id = $1', [event.id]); // let Stripe retry
+      await q(this.ds, 'DELETE FROM webhook_event WHERE id = $1', [event.id]); // let Polar retry
       throw e;
     }
   }
 
-  private async apply(event: Stripe.Event): Promise<void> {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const s = event.data.object as Stripe.Checkout.Session;
-        const accountId = s.client_reference_id;
-        const customer = typeof s.customer === 'string' ? s.customer : s.customer?.id;
-        const subId = typeof s.subscription === 'string' ? s.subscription : s.subscription?.id;
-        if (!accountId || !customer || !subId) return;
-        await q(
-          this.ds,
-          `INSERT INTO subscription (account_id, stripe_customer_id, stripe_subscription_id) VALUES ($1,$2,$3)
-           ON CONFLICT (account_id) DO UPDATE SET stripe_customer_id = EXCLUDED.stripe_customer_id, stripe_subscription_id = EXCLUDED.stripe_subscription_id`,
-          [accountId, customer, subId],
-        );
-        await this.syncSubscription(await this.stripe.retrieveSubscription(subId));
-        return;
-      }
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated':
-      case 'customer.subscription.deleted':
-        await this.syncSubscription(event.data.object as Stripe.Subscription);
-        return;
-      default:
-        return;
-    }
+  private async apply(event: PolarEvent): Promise<void> {
+    if (event.type.startsWith('subscription.')) await this.syncSubscription(event.data as PolarSubscription);
   }
 
-  private async accountIdFor(sub: Stripe.Subscription): Promise<string | null> {
-    const customer = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
-    const byCustomer = await q<{ account_id: string }[]>(this.ds, 'SELECT account_id FROM subscription WHERE stripe_customer_id = $1', [customer]);
+  private async accountIdFor(sub: PolarSubscription): Promise<string | null> {
+    const customer = sub.customer?.id ?? sub.customer_id;
+    const byCustomer = await q<{ account_id: string }[]>(this.ds, 'SELECT account_id FROM subscription WHERE provider_customer_id = $1', [customer]);
     if (byCustomer[0]) return byCustomer[0].account_id;
-    const meta = sub.metadata?.accountId;
-    if (meta) {
-      const ok = await q<{ id: string }[]>(this.ds, 'SELECT id FROM account WHERE id = $1', [meta]);
+    const ext = sub.customer?.external_id ?? (typeof sub.metadata?.accountId === 'string' ? sub.metadata.accountId : null);
+    if (ext && /^[0-9a-f-]{36}$/i.test(ext)) {
+      const ok = await q<{ id: string }[]>(this.ds, 'SELECT id FROM account WHERE id = $1', [ext]);
       if (ok[0]) {
-        await q(this.ds, `INSERT INTO subscription (account_id, stripe_customer_id) VALUES ($1,$2) ON CONFLICT (account_id) DO UPDATE SET stripe_customer_id = EXCLUDED.stripe_customer_id`, [meta, customer]);
-        return meta;
+        await q(this.ds, `INSERT INTO subscription (account_id, provider_customer_id) VALUES ($1,$2) ON CONFLICT (account_id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id`, [ext, customer]);
+        return ext;
       }
     }
     return null;
   }
 
-  /** Maps a Stripe subscription onto our plan state machine. */
-  async syncSubscription(sub: Stripe.Subscription): Promise<void> {
+  /** Maps a Polar subscription onto our plan state machine. */
+  async syncSubscription(sub: PolarSubscription): Promise<void> {
     const accountId = await this.accountIdFor(sub);
     if (!accountId) {
       this.log.warn(`subscription ${sub.id} has no matching account`);
       return;
     }
-    const item = sub.items?.data?.[0] as (Stripe.SubscriptionItem & { current_period_end?: number }) | undefined;
-    const periodEndUnix = item?.current_period_end ?? (sub as unknown as { current_period_end?: number }).current_period_end;
-    const periodEnd = periodEndUnix ? new Date(periodEndUnix * 1000) : null;
-    const interval = (item?.price?.recurring?.interval === 'year' ? 'year' : item?.price?.recurring?.interval === 'month' ? 'month' : null) as 'month' | 'year' | null;
+    const periodEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
+    const interval = (sub.recurring_interval === 'year' ? 'year' : sub.recurring_interval === 'month' ? 'month' : null) as 'month' | 'year' | null;
+    const customerId = sub.customer?.id ?? sub.customer_id;
     const current = await q<{ plan: string }[]>(this.ds, 'SELECT plan FROM account WHERE id = $1', [accountId]);
     const plan = current[0]?.plan ?? 'free';
 
@@ -199,12 +159,12 @@ export class BillingService {
 
     await q(
       this.ds,
-      `INSERT INTO subscription (account_id, stripe_customer_id, stripe_subscription_id, status, interval, current_period_end, cancel_at_period_end, grace_until, lapsed_until, updated_at)
+      `INSERT INTO subscription (account_id, provider_customer_id, provider_subscription_id, status, interval, current_period_end, cancel_at_period_end, grace_until, lapsed_until, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
-       ON CONFLICT (account_id) DO UPDATE SET stripe_customer_id = EXCLUDED.stripe_customer_id, stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+       ON CONFLICT (account_id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id, provider_subscription_id = EXCLUDED.provider_subscription_id,
          status = EXCLUDED.status, interval = EXCLUDED.interval, current_period_end = EXCLUDED.current_period_end,
          cancel_at_period_end = EXCLUDED.cancel_at_period_end, grace_until = EXCLUDED.grace_until, lapsed_until = EXCLUDED.lapsed_until, updated_at = now()`,
-      [accountId, typeof sub.customer === 'string' ? sub.customer : sub.customer.id, sub.id, status, interval, periodEnd, !!sub.cancel_at_period_end, graceUntil, lapsedUntil],
+      [accountId, customerId, sub.id, status, interval, periodEnd, !!sub.cancel_at_period_end, graceUntil, lapsedUntil],
     );
     await q(this.ds, 'UPDATE account SET plan = $2 WHERE id = $1', [accountId, newPlan]);
   }

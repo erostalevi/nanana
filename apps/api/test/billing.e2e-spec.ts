@@ -1,19 +1,18 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import Stripe from 'stripe';
+import { createHmac } from 'node:crypto';
 import { AuthController } from '../src/auth/auth.controller.js';
 import { MailService } from '../src/auth/mail.service.js';
 import { BillingService } from '../src/billing/billing.service.js';
-import { StripeGateway } from '../src/billing/stripe.gateway.js';
+import { PolarGateway } from '../src/billing/polar.gateway.js';
 import { RateLimiter } from '../src/common/rate-limiter.js';
 import { APP_CONFIG, type AppConfig } from '../src/config/app-config.js';
 import { LifecycleService } from '../src/lifecycle/lifecycle.service.js';
 import { fakeCli, harness, tryConnect, type Harness } from './helpers.js';
 
-const WHSEC = 'whsec_test_secret';
+const WHSEC = 'polar_whs_test_secret';
 let h: Harness;
 let port: number;
 let cfg: AppConfig;
-const stripe = new Stripe('sk_test_local');
 
 beforeAll(async () => {
   h = await harness();
@@ -24,11 +23,10 @@ afterAll(async () => h.close());
 beforeEach(async () => {
   await h.reset();
   (h.app.get(AuthController) as unknown as { limiter: RateLimiter }).limiter = new RateLimiter();
-  Object.assign(cfg, { stripeSecretKey: 'sk_test_local', stripeWebhookSecret: WHSEC, stripePriceMonthly: 'price_m', stripePriceYearly: 'price_y' });
-  const gw = h.app.get(StripeGateway);
-  vi.spyOn(gw, 'createCustomer').mockImplementation(async (_e, accountId) => `cus_${accountId.slice(0, 8)}`);
-  vi.spyOn(gw, 'createCheckoutUrl').mockImplementation(async (a) => `https://checkout.stripe.test/pay/${a.priceId}?c=${a.customer}`);
-  vi.spyOn(gw, 'createPortalUrl').mockImplementation(async (c) => `https://billing.stripe.test/portal/${c}`);
+  Object.assign(cfg, { polarAccessToken: 'polar_oat_local', polarWebhookSecret: WHSEC, polarProductMonthly: 'prod_m', polarProductYearly: 'prod_y' });
+  const gw = h.app.get(PolarGateway);
+  vi.spyOn(gw, 'createCheckoutUrl').mockImplementation(async (a) => `https://checkout.polar.test/${a.productId}?c=${a.accountId}`);
+  vi.spyOn(gw, 'createPortalUrl').mockImplementation(async (accountId) => `https://portal.polar.test/${accountId}`);
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -47,19 +45,30 @@ let evtN = 0;
 function subscription(accountId: string, over: Record<string, unknown> = {}) {
   return {
     id: 'sub_test_1',
-    object: 'subscription',
-    customer: `cus_${accountId.slice(0, 8)}`,
     status: 'active',
     cancel_at_period_end: false,
+    recurring_interval: 'month',
+    current_period_end: new Date(Date.now() + 30 * 86400_000).toISOString(),
+    customer_id: `cus_${accountId.slice(0, 8)}`,
+    customer: { id: `cus_${accountId.slice(0, 8)}`, external_id: accountId },
     metadata: { accountId },
-    items: { data: [{ current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400, price: { recurring: { interval: 'month' } } }] },
     ...over,
   };
 }
-async function send(type: string, object: unknown, opts: { id?: string; badSig?: boolean } = {}) {
-  const payload = JSON.stringify({ id: opts.id ?? `evt_${++evtN}`, object: 'event', type, data: { object } });
-  const header = opts.badSig ? 't=1,v1=deadbeef' : stripe.webhooks.generateTestHeaderString({ payload, secret: WHSEC });
-  return h.http.post('/billing/webhook').set('Host', 'api.localhost').set('Content-Type', 'application/json').set('Stripe-Signature', header).send(payload);
+/** Signs and delivers a Polar webhook (Standard Webhooks: HMAC-SHA256 over `id.timestamp.body`, keyed by the secret's UTF-8 bytes). */
+async function send(type: string, data: unknown, opts: { id?: string; badSig?: boolean; ageSeconds?: number } = {}) {
+  const id = opts.id ?? `msg_${++evtN}`;
+  const ts = Math.floor(Date.now() / 1000) - (opts.ageSeconds ?? 0);
+  const payload = JSON.stringify({ type, timestamp: new Date().toISOString(), data });
+  const sig = createHmac('sha256', Buffer.from(WHSEC, 'utf8')).update(`${id}.${ts}.${payload}`).digest('base64');
+  return h.http
+    .post('/billing/webhook')
+    .set('Host', 'api.localhost')
+    .set('Content-Type', 'application/json')
+    .set('webhook-id', id)
+    .set('webhook-timestamp', String(ts))
+    .set('webhook-signature', opts.badSig ? 'v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' : `v1,${sig}`)
+    .send(payload);
 }
 const planOf = async (cookie: string) => (await as(cookie, 'get', '/me')).body.account.plan as string;
 
@@ -72,38 +81,40 @@ describe('plans and checkout', () => {
     expect(free.limits.maxActiveSubdomains).toBe(3);
     expect(pro).toMatchObject({ id: 'pro', priceMonthlyCents: 800, priceYearlyCents: 8000 });
     expect(pro.limits).toMatchObject({ maxActiveSubdomains: 25, maxCustomNames: 10, retentionMaxRequests: 1000, tunnelsPerAccount: 5, alwaysOn: true, reservedNames: true });
-    cfg.stripeSecretKey = '';
+    cfg.polarAccessToken = '';
     expect((await h.api('get', '/billing/plans')).body.enabled).toBe(false);
   });
 
   it('creates checkout and portal sessions for a signed-in account', async () => {
-    const { cookie } = await login('buyer@example.com');
+    const { cookie, accountId } = await login('buyer@example.com');
     expect((await h.api('post', '/billing/checkout').send({ interval: 'month' })).status).toBe(401);
     expect((await as(cookie, 'post', '/billing/checkout').send({ interval: 'weekly' })).body.error.code).toBe('invalid_interval');
     expect((await as(cookie, 'post', '/billing/portal')).body.error.code).toBe('no_customer');
     const month = await as(cookie, 'post', '/billing/checkout').send({ interval: 'month' });
     expect(month.status).toBe(200);
-    expect(month.body.url).toContain('price_m');
+    expect(month.body.url).toContain('prod_m');
     const year = await as(cookie, 'post', '/billing/checkout').send({ interval: 'year' });
-    expect(year.body.url).toContain('price_y');
+    expect(year.body.url).toContain('prod_y');
+    expect((await as(cookie, 'post', '/billing/portal')).body.error.code).toBe('no_customer'); // Polar creates the customer at checkout; we learn of it from the webhook
+    await send('subscription.created', subscription(accountId));
     const portal = await as(cookie, 'post', '/billing/portal');
     expect(portal.status).toBe(200);
-    expect(portal.body.url).toContain('billing.stripe.test/portal/cus_');
-    cfg.stripeSecretKey = '';
-    expect((await as(cookie, 'post', '/billing/checkout').send({ interval: 'month' })).body.error.code).toBe('billing_disabled');
+    expect(portal.body.url).toContain('portal.polar.test/');
+    cfg.polarAccessToken = '';
+    expect((await as(cookie, 'post', '/billing/portal')).body.error.code).toBe('billing_disabled');
   });
 });
 
 describe('webhook and plan state machine', () => {
   it('rejects bad signatures and ignores duplicate events', async () => {
     const { accountId } = await login('a@example.com');
-    expect((await send('customer.subscription.created', subscription(accountId), { badSig: true })).status).toBe(400);
+    expect((await send('subscription.created', subscription(accountId), { badSig: true })).status).toBe(400);
     expect((await h.http.post('/billing/webhook').set('Host', 'api.localhost').send('{}')).status).toBe(400);
-    const first = await send('customer.subscription.created', subscription(accountId), { id: 'evt_dup' });
+    const first = await send('subscription.created', subscription(accountId), { id: 'msg_dup' });
     expect(first.status).toBe(200);
-    const second = await send('customer.subscription.created', subscription(accountId, { status: 'canceled' }), { id: 'evt_dup' });
+    const second = await send('subscription.created', subscription(accountId, { status: 'canceled' }), { id: 'msg_dup' });
     expect(second.status).toBe(200);
-    const [{ n }] = await h.ds.query(`SELECT count(*) AS n FROM stripe_event WHERE id = 'evt_dup'`);
+    const [{ n }] = await h.ds.query(`SELECT count(*) AS n FROM webhook_event WHERE id = 'msg_dup'`);
     expect(Number(n)).toBe(1);
     const [acct] = await h.ds.query('SELECT plan FROM account WHERE id = $1', [accountId]);
     expect(acct.plan).toBe('pro'); // the duplicate (canceled) payload was ignored
@@ -113,7 +124,7 @@ describe('webhook and plan state machine', () => {
     const { cookie, accountId } = await login('pro@example.com');
     expect(await planOf(cookie)).toBe('free');
 
-    await send('customer.subscription.created', subscription(accountId));
+    await send('subscription.created', subscription(accountId));
     let me = (await as(cookie, 'get', '/me')).body;
     expect(me.account.plan).toBe('pro');
     expect(me.limits).toMatchObject({ maxActiveSubdomains: 25, alwaysOn: true, ratePerMinute: 1500 });
@@ -123,7 +134,7 @@ describe('webhook and plan state machine', () => {
     expect(created.body.subdomain).toMatchObject({ alwaysOn: true, readOnly: false, reserved: true, isCustom: true });
 
     // payment fails: still Pro limits, 7-day grace
-    await send('customer.subscription.updated', subscription(accountId, { status: 'past_due' }));
+    await send('subscription.updated', subscription(accountId, { status: 'past_due' }));
     me = (await as(cookie, 'get', '/me')).body;
     expect(me.account.plan).toBe('pro_grace');
     expect(me.limits.maxActiveSubdomains).toBe(25);
@@ -133,13 +144,13 @@ describe('webhook and plan state machine', () => {
     expect(graceDays).toBeLessThanOrEqual(7);
 
     // card fixed: back to pro, grace cleared
-    await send('customer.subscription.updated', subscription(accountId, { status: 'active' }));
+    await send('subscription.updated', subscription(accountId, { status: 'active' }));
     me = (await as(cookie, 'get', '/me')).body;
     expect(me.account.plan).toBe('pro');
     expect(me.billing.graceUntil).toBeNull();
 
     // subscription deleted: lapsed, read-only
-    await send('customer.subscription.deleted', subscription(accountId, { status: 'canceled' }));
+    await send('subscription.revoked', subscription(accountId, { status: 'canceled' }));
     me = (await as(cookie, 'get', '/me')).body;
     expect(me.account.plan).toBe('lapsed');
     expect(me.limits.maxActiveSubdomains).toBe(3);
@@ -154,25 +165,44 @@ describe('webhook and plan state machine', () => {
     expect(Number(n)).toBe(0);
 
     // resubscribe during the read-only window restores everything
-    await send('customer.subscription.created', subscription(accountId, { id: 'sub_test_2' }));
+    await send('subscription.created', subscription(accountId, { id: 'sub_test_2' }));
     expect(await planOf(cookie)).toBe('pro');
     expect((await h.ingress(sub.slug).send('x')).status).toBe(200);
   });
 
-  it('checkout.session.completed links the subscription and syncs it', async () => {
+  it('links the Polar customer to the account on the first subscription event', async () => {
     const { cookie, accountId } = await login('chk@example.com');
-    vi.spyOn(h.app.get(StripeGateway), 'retrieveSubscription').mockResolvedValue(subscription(accountId, { id: 'sub_from_checkout' }) as unknown as Stripe.Subscription);
-    const res = await send('checkout.session.completed', { id: 'cs_1', object: 'checkout.session', client_reference_id: accountId, customer: 'cus_abc', subscription: 'sub_from_checkout' });
+    expect((await as(cookie, 'post', '/billing/portal')).body.error.code).toBe('no_customer');
+    const res = await send('subscription.active', subscription(accountId, { id: 'sub_from_checkout', customer_id: 'cus_abc', customer: { id: 'cus_abc', external_id: accountId } }));
     expect(res.status).toBe(200);
     expect(await planOf(cookie)).toBe('pro');
     const row = await h.app.get(BillingService).get(accountId);
-    expect(row).toMatchObject({ stripe_customer_id: expect.any(String), stripe_subscription_id: 'sub_from_checkout', status: 'active' });
+    expect(row).toMatchObject({ provider_customer_id: 'cus_abc', provider_subscription_id: 'sub_from_checkout', status: 'active' });
     expect((await as(cookie, 'post', '/billing/checkout').send({ interval: 'month' })).body.error.code).toBe('already_subscribed');
+    expect((await as(cookie, 'post', '/billing/portal')).status).toBe(200);
+  });
+
+  it('ignores events for unknown customers, non-subscription events and stale or unsigned deliveries', async () => {
+    const { cookie, accountId } = await login('noise@example.com');
+    expect((await send('subscription.active', subscription('00000000-0000-4000-8000-000000000000'))).status).toBe(200);
+    expect((await send('order.paid', { id: 'ord_1' })).status).toBe(200);
+    expect(await planOf(cookie)).toBe('free');
+    expect((await send('subscription.active', subscription(accountId), { ageSeconds: 3600 })).status).toBe(400); // replayed old delivery
+    expect(await planOf(cookie)).toBe('free');
+  });
+
+  it('a yearly subscription is reported as such, and cancel-at-period-end keeps Pro until the period ends', async () => {
+    const { cookie, accountId } = await login('yr@example.com');
+    await send('subscription.active', subscription(accountId, { recurring_interval: 'year' }));
+    await send('subscription.canceled', subscription(accountId, { recurring_interval: 'year', cancel_at_period_end: true }));
+    const me = (await as(cookie, 'get', '/me')).body;
+    expect(me.account.plan).toBe('pro');
+    expect(me.billing).toMatchObject({ interval: 'year', cancelAtPeriodEnd: true, status: 'active' });
   });
 
   it('lapses after the 7-day grace and returns to free after 30 days with cleanup', async () => {
     const { cookie, accountId } = await login('flow@example.com');
-    await send('customer.subscription.created', subscription(accountId));
+    await send('subscription.created', subscription(accountId));
     const slugs: string[] = [];
     for (let i = 0; i < 5; i++) slugs.push((await as(cookie, 'post', '/subdomains').send(i === 0 ? { name: 'keep-my-name' } : {})).body.subdomain.slug);
     await as(cookie, 'delete', '/subdomains/keep-my-name'); // Pro: name stays reserved
@@ -181,7 +211,7 @@ describe('webhook and plan state machine', () => {
     const other = await login('other@example.com');
     expect((await as(other.cookie, 'post', '/subdomains').send({ name: 'keep-my-name' })).body.error.code).toBe('name_tombstoned');
 
-    await send('customer.subscription.updated', subscription(accountId, { status: 'past_due' }));
+    await send('subscription.updated', subscription(accountId, { status: 'past_due' }));
     await h.ds.query(`UPDATE subscription SET grace_until = now() - interval '1 minute' WHERE account_id = $1`, [accountId]);
     const bill = h.app.get(BillingService);
     expect((await bill.housekeeping()).lapsed).toBe(1);
@@ -209,7 +239,7 @@ describe('Pro entitlements', () => {
     const create = (b: object) => as(cookie, 'post', '/subdomains').send(b);
     for (let i = 0; i < 3; i++) expect((await create({})).status).toBe(201);
     expect((await create({})).body.error.code).toBe('limit_reached'); // free: 3
-    await send('customer.subscription.created', subscription(accountId));
+    await send('subscription.created', subscription(accountId));
     for (let i = 0; i < 10; i++) expect((await create({ name: `name-number-${i}` })).status).toBe(201);
     expect((await create({ name: 'name-number-x' })).body.error.code).toBe('limit_reached');
 
@@ -230,7 +260,7 @@ describe('Pro entitlements', () => {
 
   it('keeps more than 100 requests for Pro', async () => {
     const { cookie, accountId } = await login('keep@example.com');
-    await send('customer.subscription.created', subscription(accountId));
+    await send('subscription.created', subscription(accountId));
     const slug = (await as(cookie, 'post', '/subdomains').send({})).body.subdomain.slug;
     const sub = (await h.ds.query('SELECT id FROM subdomain WHERE slug = $1', [slug]))[0];
     const { v7 } = await import('uuid');
@@ -243,7 +273,7 @@ describe('Pro entitlements', () => {
 
   it('limits simultaneous tunnels per account (free 3, Pro 5)', async () => {
     const { cookie, accountId } = await login('tun@example.com');
-    await send('customer.subscription.created', subscription(accountId));
+    await send('subscription.created', subscription(accountId));
     const subs: { slug: string }[] = [];
     for (let i = 0; i < 6; i++) subs.push((await as(cookie, 'post', '/subdomains').send({})).body.subdomain);
     const token = (await as(cookie, 'post', `/subdomains/${subs[0].slug}/token`)).body.token as string;
