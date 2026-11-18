@@ -14,6 +14,11 @@ export interface ConsumedMock {
 
 @Injectable()
 export class MocksService {
+  /** subdomain id -> time until which "this endpoint has no mock" is trusted. Saves an UPDATE per webhook. */
+  private readonly noMock = new Map<string, number>();
+  /** Bumped by set/clear so a consume that raced with them cannot cache a stale "no mock". */
+  private gen = 0;
+
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(EventsService) private readonly events: EventsService,
@@ -34,6 +39,8 @@ export class MocksService {
         headers[k.toLowerCase()] = v;
       }
     }
+    this.gen++;
+    this.noMock.delete(sub.id);
     await q(this.ds, 
       `INSERT INTO mock_rule (id, subdomain_id, status, headers, body, remaining) VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (subdomain_id) DO UPDATE SET status=$3, headers=$4, body=$5, remaining=$6, created_at=now()`,
@@ -45,18 +52,32 @@ export class MocksService {
   }
 
   async clear(sub: { id: string; slug: string }): Promise<void> {
+    this.gen++;
+    this.noMock.delete(sub.id);
     await q(this.ds, 'DELETE FROM mock_rule WHERE subdomain_id = $1', [sub.id]);
     this.events.emit(sub.slug, 'mock.updated', null);
   }
 
   async consume(sub: { id: string; slug: string }): Promise<ConsumedMock | null> {
+    const until = this.noMock.get(sub.id);
+    if (until !== undefined) {
+      if (until > Date.now()) return null;
+      this.noMock.delete(sub.id);
+    }
+    const gen = this.gen;
     const rows = await q<{ status: number; headers: Record<string, string>; body: string; remaining: number }[]>(this.ds, 
       `UPDATE mock_rule SET remaining = remaining - 1 WHERE subdomain_id = $1 AND remaining > 0
        RETURNING status, headers, body, remaining`,
       [sub.id],
     );
     const r = rows[0];
-    if (!r) return null;
+    if (!r) {
+      if (gen === this.gen) {
+        if (this.noMock.size > 20_000) this.noMock.clear();
+        this.noMock.set(sub.id, Date.now() + 60_000);
+      }
+      return null;
+    }
     if (r.remaining <= 0) {
       await q(this.ds, 'DELETE FROM mock_rule WHERE subdomain_id = $1', [sub.id]);
       this.events.emit(sub.slug, 'mock.updated', null);

@@ -75,6 +75,28 @@ export class RequestsService {
     };
   }
 
+  /**
+   * Same object as `summary(row, sub)` for a capture the caller still holds in memory, so the hot path needs no SELECT.
+   * `body` is the full request body (needed for the HMAC check and the 1 KB preview).
+   */
+  summaryFromParts(
+    sub: SubRow,
+    p: {
+      id: string; method: string; path: string; headers: HeaderMap; body: Buffer; contentType: string | null; sourceIp: string; receivedAt: Date;
+      answeredBy: string | null; responseStatus: number | null; latencyMs: number | null; forwardError: string | null; isPreflight: boolean; mocked: boolean;
+    },
+  ) {
+    return this.summary(
+      {
+        id: p.id, subdomain_id: sub.id, method: p.method, path: p.path, headers: p.headers, body: p.body, head: p.body.subarray(0, 1024),
+        body_size: p.body.length, content_type: p.contentType, source_ip: p.sourceIp, received_at: p.receivedAt, answered_by: p.answeredBy,
+        response_status: p.responseStatus, response_headers: null, response_body: null, response_truncated: false, latency_ms: p.latencyMs,
+        forward_error: p.forwardError, is_preflight: p.isPreflight, mocked: p.mocked,
+      },
+      sub,
+    );
+  }
+
   async summaryById(sub: SubRow, id: string) {
     const needFull = !!sub.hmac_secret_enc;
     const rows = await q<CaptureRow[]>(this.ds, 
